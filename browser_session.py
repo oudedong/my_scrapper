@@ -4,6 +4,7 @@ from playwright.async_api import async_playwright
 import sys
 from playwright.async_api import TimeoutError
 from .html_cleaner import *
+from dataclasses import dataclass
 """
 기본 구성 클래스들
 """
@@ -190,6 +191,8 @@ class Context:
         # 복원x
         else:
             self.pages = []
+    async def close(self):
+        await self.context.close()
     async def save_session(self):
         # 세션저장
         await self.context.storage_state(path=self.session_path)
@@ -231,6 +234,7 @@ class Page(Base):
                 Page_Record( # 새로운 프레임, url, 유발한 커맨드
                     n_frames, 
                     new_url,
+                    await self.page.title(),
                     [command]
                 )
             )
@@ -245,7 +249,7 @@ class Page(Base):
     async def _execute_command(self, command:"Command")->bool:
         # 커맨드를 실행하고, 유효한지검사, 유효하면 기록에 추가
         await command.do(self.records[-1].frames) 
-        await self._update_page_state(command)
+        return await self._update_page_state(command)
 
     async def goto(self, url:str):
         # 페이지 이동
@@ -256,10 +260,11 @@ class Page(Base):
                 Page_Record( # 새로운 프레임, url, 유발한 커맨드
                     [await Frame.create(frame, self.tag_extractor) for frame in self.page.frames], 
                     url,
+                    await self.page.title(),
                     [None]
                 )
             )
-    async def click_locator(self, frame_idx:int, locator_idx:int):
+    async def click_locator(self, frame_idx:int, locator_idx:int)->bool:
         async def _click_command(targets):
             try:
                 await targets[0].click(timeout=5000)
@@ -267,16 +272,16 @@ class Page(Base):
                 print(f"클릭 실패", file=sys.stderr)
         click_command = Command(
             _click_command,
-            frame_idx,locator_idx
+            frame_idx,locator_idx,
         )
-        await self._execute_command(click_command)
+        return await self._execute_command(click_command)
     async def fill_locators(
         self,
         frame_idx: int,
         locator_idxs: list[int],
         contents: list[str],
         submit: bool = False
-    ):
+    )->bool:
         async def _fill_command(targets , contents, submit):
             for target, content in zip(targets, contents):
                 await target.fill(content)
@@ -293,21 +298,18 @@ class Page(Base):
             locator_idxs,
             contents, submit
         )
-        await self._execute_command(fill_command)
-    def get_page_info(self) -> str:
+        return await self._execute_command(fill_command)
+    def get_page_info(self) -> "PageInfo":
         if not self.records:
             return "No page loaded"
         record = self.records[-1]
-        result = [
-            f"Page URL: {record.url}",
-            f"Frame Count: {len(record.frames)}",
-            ""
-        ]
-        for i,frame in enumerate(record.frames):
-            result.append(
-                f"[Frame {i}]\n{frame.get_frame_info()}"
-            )
-        return "\n".join(result)
+        return PageInfo(
+            record.url,
+
+            [frame.get_frame_info() for frame in record.frames]
+        )
+    async def get_raw_content(self)->str:
+        return await recursive_iframe_replace(self.page.main_frame)
     async def rollback(
         self,
         record_idx: int,
@@ -331,11 +333,15 @@ class Page(Base):
             await self.rollback(
                 last_record_idx - 1
             )
+    async def locator(self, path:str, frame_idx:int)->"LocatorInfo":
+        return await self.records[-1].frames[frame_idx].locator(path)
+        
         
 class Page_Record:
-    def __init__(self, frames, url, commands:list=[]):
+    def __init__(self, frames, url, title, commands:list=[]):
         self.frames:list[Frame] = frames
         self.url:str            = url
+        self.title:str          = title
         self.commands:list["Command"] = commands # 몇번인덱스의 프레임에 뭘 작업했는지를 나타냄, 뭔가 유효한 작업일때만(url변화, dom변화) 기록?
     def append_command(self,command:"Command"):
         #index는 frame의 인덱스를 나타냄
@@ -378,71 +384,119 @@ class Frame(Base):
         temp = Frame(frame, tag_extractor)
         # 초기화
         temp.locators = await temp.tag_extractor(temp.frame)
-        temp.locators_describe_record.append(await temp._describe_locators())
+        temp.locator_infos_record = await temp._describe_locators()
         return temp
     def __init__(self, frame, tag_extractor):
         self.frame = frame
         self.tag_extractor = tag_extractor
         self.locators      = None           # tag_extractor로 추출한 locators, 인덱스로 접근함
-        self.locators_describe_record:list[list[str]] = []       # locators각각에 대한 시그니처 저장
+        self.locator_infos_record:list[LocatorInfo] = []       # locators각각에 대한 시그니처 저장
         self.url = frame.url                # 프레임의 주소
         # self.clicked_elements_nths = []     # 작업(클릭,입력)기록, 인덱스
-    async def _describe_locators(self):
+    async def _describe_locator(self,locator)->"LocatorInfo":
+        #단일 로케이터를 Info로 변환
+        return LocatorInfo(
+            **await locator.evaluate(
+                    """
+                    el => ({
+                        tag: el.tagName,
+                        text: (el.innerText || "").trim(),
+                        value: el.value || "",
+                        placeholder: el.placeholder || "",
+                        href: el.href || ""
+                    })
+                    """
+                )
+        )
+
+    async def _describe_locators(self)->list["LocatorInfo"]:
         # 태그명과, 안에 텍스트를 출력함
         count = await self.locators.count()
-        locators_describe = [
-            await self.locators.nth(j).evaluate(
-                """
-                el => ({
-                    tag: el.tagName,
-                    text: (el.innerText || "").trim(),
-                    value: el.value || "",
-                    placeholder: el.placeholder || "",
-                    href: el.href || ""
-                })
-                """
-            )
-            for j in range(count)
-        ]
-        return locators_describe
+        locator_infos = [ self._describe_locator(self.locators.nth(j)) for j in range(count)]
+        return locator_infos
     async def _update_frame_state(self)->bool:
         await self.wait_dom_stable(self.frame)
-        locators_describe_old = self.locators_describe_record[-1]
+        locator_info_old = self.locator_infos_record
         self.locators = await self.tag_extractor(self.frame) # 일단 locator들은 갱신함
-        locators_describe_new = await self._describe_locators()
+        locator_info_new = await self._describe_locators()
         new_url = self.frame.url
 
         if new_url != self.url: # url이 바뀌었으면
             self.url = new_url
-            self.locators_describe_record.append(locators_describe_new)
+            self.locator_infos_record=locator_info_new
             return True
-        for describe in locators_describe_new: # 새로운 locator가 생겼으면
-            if describe not in locators_describe_old:
-                    self.locators_describe_record.append(locators_describe_new)
-                    return True
-        self.locators_describe_record[-1] = locators_describe_new
+        if locator_info_old != locator_info_new: # 추가,삭제,변화 등을 감지함
+            self.locator_infos_record=locator_info_new
+            return True
         return False
-    def get_frame_info(self) -> str:
-        result = [
-            f"Frame URL: {self.url}",
-            ""
-        ]
-        for j, desc in enumerate(self.locators_describe_record[-1]):
-            result.append(
-                f"  [{j}] {desc}"
-            )
-        result.append("")
-        return "\n".join(result)
+    def get_frame_info(self) -> "FrameInfo":
+        return FrameInfo(self.url, self.locator_infos_record) # 마지막 로케이터들 반환
+    async def locator(self, path:str)->"LocatorInfo":
+        return await self._describe_locator(self.frame.locator(path))
+
+
+@dataclass
+class LocatorInfo:
+    # 로케이터의 정보를 나타냄
+    tag: str
+    text: str
+    value: str
+    placeholder: str
+    href: str
+@dataclass
+class FrameInfo:
+    # 프레임의 정보를 나타냄
+    url: str
+    locatorInfos: list[LocatorInfo]
+@dataclass
+class PageInfo:
+    # 페이지의 정보를 나타냄
+    url: str
+    title: str
+    frameInfos: list[FrameInfo]
 
 class PageAnalyzer:
     def __init__(self, page:Page):
         self.page = page
         # self.post_processor = post_processor
 
-    async def get_raw_content(self)->str:
-        return await recursive_iframe_replace(self.page.page.main_frame)
     async def get_post_processed_content(self)->str:
-        return clean_html(await self.get_raw_content())
+        return clean_html(await self.page.get_raw_content())
+    def print_page_info(self)->str:
+        def get_locator_info_header(locatorInfo:LocatorInfo)->str:
+            l_dict = locatorInfo.__dict__
+            headers = ["[index]"]
+            headers += [f"{key}" for key in l_dict.keys()]
+            return ", ".join(headers)
+        def print_locator_info(locatorInfo:LocatorInfo)->str:
+            l_dict = locatorInfo.__dict__
+            return ", ".join([f"{value}" for value in l_dict.values()])
+        def print_frame_info(frameInfo:FrameInfo)->str:
+            result = [
+                f"Frame URL: {frameInfo.url}",
+            ]
+            result.append(get_locator_info_header(frameInfo.locatorInfos[0]))
+            for j, locatorInfo in enumerate(frameInfo.locatorInfos):
+                result.append(
+                    f"  [{j}] {print_locator_info(locatorInfo)}"
+                )
+            result.append("")
+            return "\n".join(result)
+
+        page_info = self.page.get_page_info()
+        frame_infos = page_info.frameInfos
+        result = [
+            f"Page URL: {page_info.url}",
+            f"Page Title: {page_info.title}",
+            f"Frame Count: {len(frame_infos)}",
+            ""
+        ]
+        for i,frameInfo in enumerate(frame_infos):
+            result.append(
+                f"[Frame {i}]\n{print_frame_info(frameInfo)}"
+            )
+        return "\n".join(result)
+
     async def get_text(self):
         ...    
 
