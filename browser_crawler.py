@@ -33,6 +33,7 @@ async def _recursive_dynamic_click(
     """
     프레임에서 클릭 가능한 요소들을 모두 클릭해보며 이동되는 URL을 수집합니다.
     동적으로 생성되는 요소(드롭다운 등)도 재귀적으로 탐색합니다.
+    URL은 bfs로 생성되는 요소는 dfs로
     """
     rets = []
     locators_before = page_obj.get_page_info().frameInfos[frame_index].locatorInfos # 갱신이전
@@ -98,7 +99,7 @@ async def _recursive_dynamic_click(
     return rets
 
 
-async def a(session_path:str, url: str, visited, Redirected_page_urls:"Redirected_page_urls"=None, depth: int = 1) -> list[dict]:
+async def collect_page_urls(session_path:str, url: str, visited, Redirected_page_urls:"Redirected_page_urls"=None, depth: int = 1) -> list[dict]:
     """
     페이지에서 클릭 가능한 요소들을 탐색하여 이동되는 URL들을 수집합니다.
     iframe 내부도 탐색하며, depth만큼 재귀적으로 수집합니다.
@@ -298,13 +299,14 @@ class Try_login_solver(Redirected_page_solver):
         css_path_pw = data['css_path_pw']
         login_id = data['login_id']
         login_pw = data['login_pw']
+        # login_btn = data['login_bnt']
         # 로그인 페이지로 이동
         await page.goto(login_url)
         # 로그인 요소들 찾기
         id_field = await page.locator(css_path_id, frame_idx)
         pw_field = await page.locator(css_path_pw, frame_idx)
         # id,비번 입력
-        await page.fill_locators(frame_idx, id_field.)
+        await id_field.fill(login_id)
         await pw_field.fill(login_pw)
         # 엔터
         await pw_field.press("Enter")
