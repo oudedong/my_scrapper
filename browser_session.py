@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import time
 from playwright.async_api import async_playwright, Page as PlaywrightPage, Frame as PlaywrightFrame, Locator as PlaywrightLocator, Playwright, Browser, BrowserContext
+import sys
 from .html_cleaner import clean_html, recursive_iframe_replace
 from dataclasses import dataclass
 from typing import Callable, Any, override
@@ -57,12 +58,16 @@ async def default_tag_extractor(frame: PlaywrightFrame) -> PlaywrightLocator:
                 if (isForbidden)
                     return;
 
-                // 실제 상호작용 가능한 요소인지 판별
-                const isStandardInteractive = el.matches("a, button, input, textarea, select");
-                const isClickableRole = el.getAttribute("role") === "button" || el.getAttribute("onclick") !== null;
-                const hasPointer = window.getComputedStyle(el).cursor === "pointer";
+                const hasText = Array.from(el.childNodes).some(node =>
+                    node.nodeType === 3 && node.textContent.trim().length > 0
+                );
 
-                if (isStandardInteractive || isClickableRole || hasPointer) {
+                const isInteractive =
+                    el.matches(
+                        "button, input, textarea, select"
+                    );
+
+                if (hasText || isInteractive) {
                     el.classList.add(
                         "mcp-clickable-target"
                     );
@@ -84,35 +89,39 @@ async def default_tag_extractor(frame: PlaywrightFrame) -> PlaywrightLocator:
 
 class Base:
     async def wait_dom_stable(self, target: PlaywrightPage | PlaywrightFrame, timeout: int = 5000, stable_ms: int = 500) -> None:
-        """이벤트 및 상호작용 가능한 요소들의 구조가 안정화될 때까지 대기합니다."""
+        """DOM 내용과 아이프레임 개수가(페이지일 경우) 모두 멈출 때까지 대기합니다."""
+        # 수정필요!!!! 광고,시간같이 계속 변하는경우 어떻게 처리할지
         start_time = time.time()
-        last_sig = ""
+        last_html = ""
+        last_frame_count = -1
         stable_start: float | None = None
+        counter: Callable[[Any], int]
+
+        if hasattr(target, "frames"):
+            counter = lambda t: len(t.frames)
+        else:
+            counter = lambda t: len(t.child_frames)
 
         while True:
             gap = (time.time() - start_time) * 1000
             if gap > timeout:
+                print("[!] wait_dom_stable: 시간 초과 (현재 상태로 진행)", file=sys.stderr)
                 return
             try:
-                # 상호작용 가능한 요소들의 태그, 위치, 개수 등의 시그니처만 추출하여 비교
-                current_sig: str = await target.evaluate("""
-                    () => {
-                        const els = document.querySelectorAll("a, button, input, textarea, select, [role='button']");
-                        let sig = "";
-                        els.forEach(el => {
-                            sig += `${el.tagName}:${el.id}:${el.className};`;
-                        });
-                        return sig;
-                    }
-                """)
-                if current_sig == last_sig:
+                current_html = await target.content()
+                current_frame_count = counter(target)
+                # 1. 메인 HTML 내용과 프레임 개수가 '모두' 이전 루프와 똑같은지 확인
+                if current_html == last_html and current_frame_count == last_frame_count:
                     if stable_start is None:
                         stable_start = time.time()
+                    # 2. 지정된 시간(예: 500ms) 동안 변화가 없었다면 조건 충족
                     if (time.time() - stable_start) * 1000 >= stable_ms:
-                        return
+                        return  # 완전히 안정화됨
                 else:
+                    # 변화가 생겼다면 타이머를 초기화하고 최신 상태를 기록
                     stable_start = None
-                    last_sig = current_sig
+                    last_html = current_html
+                    last_frame_count = current_frame_count
             except Exception:
                 await asyncio.sleep(0.2)
                 continue
