@@ -1,6 +1,7 @@
 import re
-from typing import Callable
+from typing import Callable, Any
 from bs4 import BeautifulSoup, Comment
+from playwright.async_api import Frame as PlaywrightFrame
 
 
 def replace_content_first(content: str, replace_content: str, tag: str) -> str:
@@ -17,7 +18,7 @@ def replace_content_first(content: str, replace_content: str, tag: str) -> str:
     return str(soup)
 
 
-async def recursive_iframe_replace(root) -> str:
+async def recursive_iframe_replace(root: PlaywrightFrame) -> str:
     """재귀적으로 iframe 요소를 찾아 실제 내용으로 치환합니다."""
     child_iframes = root.child_frames
     content = await root.content()
