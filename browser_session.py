@@ -105,7 +105,7 @@ class Base:
         while True:
             gap = (time.time() - start_time) * 1000
             if gap > timeout:
-                print("[!] wait_dom_stable: 시간 초과 (현재 상태로 진행)", file=sys.stderr)
+                print("[!] wait_dom_stable: 시간 초과 (현재 상태로 그냥 진행)", file=sys.stderr)
                 return
             try:
                 current_html = await target.content()
@@ -211,7 +211,7 @@ class Context:
             await Context.browser.close()
             await Context.playwright.stop()
 
-    async def save_session(self):
+    async def save_session(self)->None:
         # 세션저장
         await self.context.storage_state(path=self.session_path)
 
@@ -394,6 +394,7 @@ class Click(Command):
     def __init__(self, frame_idx: int, locator_idxs: int | list[int], **kwargs: Any):
         super().__init__(frame_idx, locator_idxs, **kwargs)
         self.action = "click"
+    @override
     async def _do(self, targets: list["LocatorNode"]) -> None:
         if len(targets) > 1:
             raise ValueError("can click only one element at time")
@@ -404,6 +405,7 @@ class Fill(Command):
     def __init__(self, frame_idx: int, locator_idxs: int | list[int], **kwargs: Any):
         super().__init__(frame_idx, locator_idxs, **kwargs)
         self.action = "fill"
+    @override
     async def _do(self, targets: list["LocatorNode"]) -> None:
         submit: LocatorNode | None = None
         if self.kwargs.get('last_is_submit'):

@@ -2,11 +2,18 @@ from __future__ import annotations
 import sys
 from collections import deque
 from typing import Any, override
-from urllib.parse import urlparse
 
 from .browser_session import LocatorNode, PageInfo, Page, Context
 
 from abc import ABC, abstractmethod
+
+def get_clean_url(url: str) -> str:
+    # URL에서 프래그먼트(#)만 제거하고 쿼리스트링(?...)은 유지한 깨끗한 URL을 반환함
+    return url.split('#')[0]
+
+def is_same_page_url(url1: str, url2: str) -> bool:
+    """두 URL이 실질적으로 같은 페이지를 가리키는지 확인합니다 (쿼리스트링 및 프레그먼트 무시)."""
+    return get_clean_url(url1) == get_clean_url(url2)
 
 class IndexedLocatorInfo:
     """LocatorNode에 인덱스를 추가한 클래스"""
@@ -14,7 +21,7 @@ class IndexedLocatorInfo:
         self.locatornode: LocatorNode = locatornode
         self.frame_idx: int = frame_idx
         self.locator_idx: int = locator_idx
-        self.frame_url: str = frame_url
+        self.frame_url: str = get_clean_url(frame_url)
     @override
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, IndexedLocatorInfo):
@@ -57,6 +64,9 @@ class PageSnapshot:
         set_diff_disappeared_elements = set_self - set_other
         set_intersection_elements = set_other & set_self
         
+        # print("self의 요소들:",[i.locatornode.values() for i in set_self])
+        # print("other의 요소들:",[i.locatornode.values() for i in set_other])
+        # print("새로생긴요소들:",[i.locatornode.values() for i in set_diff_new_elements]) # 디버깅
         diff["new"] = self._get_dict(set_diff_new_elements)
         diff["disappeared"] = self._get_dict(set_diff_disappeared_elements)
         diff["intersection"] = self._get_dict(set_intersection_elements)
@@ -72,13 +82,13 @@ class PageSnapshotStack:
     def pop(self) -> tuple[int, int] | None:
         return self._stack.pop()
     def check_and_add_new_elements(self, new_snapshot: PageSnapshot) -> bool:
-        if new_snapshot.page_info.url != self._snapshot.page_info.url:
+        if not is_same_page_url(new_snapshot.page_info.url, self._snapshot.page_info.url):
             raise Exception("URL이 변경되었습니다.")
         diffs = self._snapshot.diff(new_snapshot)
         new_elements = diffs["new"]
         if len(new_elements) <= 0:
             return False
-        self._stack.append(None)
+        self._stack.append(None) # 페이지가 변화했다는거를 표시함->다시 undo하기 위해서
         for frame_idx, indices in new_elements.items():
             for idx in indices:
                 self._stack.append((frame_idx, idx))
@@ -89,10 +99,13 @@ class DynamicClickExplorer:
     """Page를 움직여서 탐색함"""
     def __init__(self, page:Page):
         self.page: Page = page
-        self._history: list[PageSnapshotStack] = [] 
+        self._history: list[PageSnapshotStack] = []
+        self._depth: int = 0
 
     def _get_last(self)->PageSnapshotStack:
         return self._history[-1]
+    def get_depth(self)->int:
+        return self._depth
     async def next(self):
         '''다음변화(페이지 이동, 요소변화)까지 page를 이동"시킴!!!!!"'''
         if len(self._history) <= 0:
@@ -109,10 +122,12 @@ class DynamicClickExplorer:
                     break
                 await self.page.undo()
                 self._history.pop()
+                self._depth -= 1
                 continue
 
-            if candidate == None:
+            if candidate == None: # 새로운 요소들을 전부 눌러봤을때 변화가 없을때 -> 이페이지에서 할꺼는 끝났으니 undo하고 돌아가자
                 await self.page.undo()
+                # self._depth -= 1
                 continue
             f_idx, l_idx = candidate
             try:
@@ -124,15 +139,16 @@ class DynamicClickExplorer:
 
             new_page_info = await self.page.get_page_info()
             new_snapshot = PageSnapshot(new_page_info)
-            # 먼저 url이 바뀌었는지 확인
-            if new_page_info.url != cur.page_url:
+            # 먼저 url이 바뀌었는지 확인 (fragment # 제외한 부분 비교)
+            if not is_same_page_url(new_page_info.url, cur.page_url):
                 self._history.append(PageSnapshotStack(new_snapshot))
+                self._depth += 1
                 return
             # 그다음 요소변화 확인
             if cur.check_and_add_new_elements(new_snapshot):
                 return 
     async def abort(self):
-        """이동된 페이지,상태가 맘에 안들면(예:원치않는 url로 감,팝업이 뜸,오류가 뜸 등) 이거를 호출해서 해당부분을 스택에서 전부 제거하고, 되돌림"""
+        """이동된 페이지,상태가 맘에 안들면(예:원치않는 url로 감,팝업이 뜸,오류가 뜸, 초과깊이 등) 이거를 호출해서 해당부분을 스택에서 전부 제거하고, 되돌림"""
         cur = self._get_last()
         while cur.stack_size > 0:
             poped = cur.pop()
@@ -140,9 +156,37 @@ class DynamicClickExplorer:
                 break
         if cur.stack_size <= 0:
         # 스택크기가 0이면 현재페이지에서 변화가 없었음->되돌아가면 이전페이지로 돌아가야됨
+            self._depth -= 1
             self._history.pop()
         await self.page.undo()
-            
+class DynamicURLExplorer:    
+    def __init__(self, page:Page, url_group: Global_visit_page_url, max_depth: int):
+        self.page = page
+        self._dynamic_click_explorer: DynamicClickExplorer = DynamicClickExplorer(page)
+        self._url_group: Global_visit_page_url = url_group
+        self._max_depth = max_depth
+    async def _is_max_depth(self) -> bool:
+        return self._dynamic_click_explorer.get_depth() >= self._max_depth
+    async def next(self):
+        # 시작상태
+        page_info = await self.page.get_page_info()
+        url_init = get_clean_url(page_info.url)
+        while True:
+            while await self._is_max_depth(): # 최대 깊이를 넘었으면 되돌아와서 시작
+                await self._dynamic_click_explorer.abort()
+            await self._dynamic_click_explorer.next()
+            page_info = await self.page.get_page_info()
+            url_final = get_clean_url(page_info.url)
+            if url_init == url_final: # 페이지에서 변화는 생겼는데, url은 그대로일때
+                if url_final not in self._url_group: # 초기화 상태가 아니라면
+                    self._url_group.add({"url":url_final})        
+                continue # abort는 하면 안됨, 새로운 요소에 링크가 있을 수 있음.
+            if url_final in self._url_group: # 이미방문한 url일때
+                await self._dynamic_click_explorer.abort()
+                continue
+            self._url_group.add({"url":url_final})
+            return
+        
 class RedirectError(Exception):
     def __init__(self, intended_url: str, current_url: str, current_page_title: str):
         super().__init__()
@@ -174,11 +218,6 @@ class Global_visit_set_page_url(Global_visit_page_url):
     def add(self, data: dict[str, Any]) -> None:
         self.set.add(data['url'])
 
-def get_clean_url(url: str) -> str:
-    # URL에서 쿼리스트링을 제외한 부분만 반환함
-    parsed_url = urlparse(url)
-    clean_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
-    return clean_url
 
 class Redirected_page_urls(Global_visit_page_url, ABC):
     """리다이렉션 페이지로 이동했는지 확인, 해결을 시도해보는 클래스"""
