@@ -3,9 +3,10 @@ import sys
 from collections import deque
 from typing import Any, override
 
-from .browser_session import LocatorNode, PageInfo, Page, Context, NotCoveredTagExtractor
+from .browser_session import LocatorNode, PageInfo, Page, Context, Page_Record
 
 from abc import ABC, abstractmethod
+from typing import cast
 
 def get_clean_url(url: str) -> str:
     # URL에서 프래그먼트(#)만 제거하고 쿼리스트링(?...)은 유지한 깨끗한 URL을 반환함
@@ -131,10 +132,10 @@ class DynamicClickExplorer:
                 continue
             f_idx, l_idx = candidate
             try:
-                print(f"클릭시도:{self.page._get_current_record().frames[f_idx].locator_nodes[l_idx].values()}")
+                print(f"클릭시도:{cast(Page_Record,self.page._get_current_record()).get_last_frames()[f_idx].locator_manager.locator_nodes[l_idx].values()}")
                 await self.page.click_locator(f_idx,l_idx) # 시간초과 등등 무시하고 계속 ㄱㄱ
             except Exception as e:
-                print(f"클릭실패:{self.page._get_current_record().frames[f_idx].locator_nodes[l_idx].values()}")
+                print(f"클릭실패:{cast(Page_Record,self.page._get_current_record()).get_last_frames()[f_idx].locator_manager.locator_nodes[l_idx].values()}")
                 continue
 
             new_page_info = await self.page.get_page_info()
@@ -290,7 +291,7 @@ class Redirected_page_solver(ABC):
         try:
             # solver로 해결시도
             context = await Context.create(self.session_path)
-            page = await context.new_page(NotCoveredTagExtractor())
+            page = await context.new_page()
             await self._solve(page, data)
             # url변화시 성공으로 간주
             page_info = await page.get_page_info()
