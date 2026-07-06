@@ -1,6 +1,6 @@
 from __future__ import annotations
 import asyncio
-import time
+import time, difflib
 from playwright.async_api import async_playwright, Page as PlaywrightPage, Frame as PlaywrightFrame, Locator as PlaywrightLocator, Playwright, Browser, BrowserContext
 import sys
 from .html_cleaner import clean_html, recursive_iframe_replace
@@ -11,82 +11,222 @@ from abc import ABC, abstractmethod
 """
 기본 구성 클래스들
 """
+class TagExtractor:
+    def __init__(self,includes:list[str]|None=None,excludes:list[str]|None=None):
+        self.selectors:list[str] = includes or ["a","li","span","div","p","button","input","textarea","select"]
+        self.forbidden_keywords:list[str] = excludes or ["로그아웃", "logout", "signout", "exit", "나가기","비밀번호 변경", "회원탈퇴", "delete account"]
+    async def extract(self,frame:PlaywrightFrame)->list[PlaywrightLocator]:
+        """프레임에서 클릭 가능한 후보 요소들을 뽑아줍니다."""
+        selector_str = ", ".join(self.selectors)
+        await frame.evaluate(
+            """
+            (args) => {
+                const { sel, keywords } = args;
 
-async def default_tag_extractor(frame: PlaywrightFrame) -> PlaywrightLocator:
-    """프레임에서 클릭 가능한 후보 요소들을 뽑아줍니다."""
+                const elements = document.querySelectorAll(sel);
 
-    forbidden_keywords = [
-        "로그아웃", "logout", "signout", "exit", "나가기",
-        "비밀번호 변경", "회원탈퇴", "delete account"
-    ]
+                elements.forEach(el => {
+                    const text =
+                        (el.innerText || "").toLowerCase();
 
-    selectors = [
-        "a",
-        "li",
-        "span",
-        "div",
-        "p",
-        "button",
-        "input",
-        "textarea",
-        "select"
-    ]
+                    const href =
+                        (el.getAttribute("href") || "")
+                        .toLowerCase();
 
-    selector_str = ", ".join(selectors)
+                    const isForbidden =
+                        keywords.some(k =>
+                            text.includes(k) ||
+                            href.includes(k)
+                        );
 
-    await frame.evaluate(
-        """
-        (args) => {
-            const { sel, keywords } = args;
+                    if (isForbidden)
+                        return;
 
-            const elements = document.querySelectorAll(sel);
-
-            elements.forEach(el => {
-                const text =
-                    (el.innerText || "").toLowerCase();
-
-                const href =
-                    (el.getAttribute("href") || "")
-                    .toLowerCase();
-
-                const isForbidden =
-                    keywords.some(k =>
-                        text.includes(k) ||
-                        href.includes(k)
+                    const hasText = Array.from(el.childNodes).some(node =>
+                        node.nodeType === 3 && node.textContent.trim().length > 0
                     );
 
-                if (isForbidden)
-                    return;
+                    const isInteractive =
+                        el.matches(
+                            "button, input, textarea, select"
+                        );
 
-                const hasText = Array.from(el.childNodes).some(node =>
-                    node.nodeType === 3 && node.textContent.trim().length > 0
-                );
+                    if (hasText || isInteractive) {
+                        el.classList.add(
+                            "mcp-clickable-target"
+                        );
+                    }
+                });
+            }
+            """,
+            {
+                "sel": selector_str,
+                "keywords": self.forbidden_keywords,
+            }
+        )
 
-                const isInteractive =
-                    el.matches(
-                        "button, input, textarea, select"
+        return (
+            await frame
+            .locator(".mcp-clickable-target")
+            .filter(visible=True)
+            .all()
+        )
+class NotCoveredTagExtractor(TagExtractor):
+    def __init__(self,includes:list[str]|None=None,excludes:list[str]|None=None):
+        super().__init__(includes,excludes)
+    async def _filter_visible(self, locators:list[PlaywrightLocator])->list[PlaywrightLocator]:
+        """html에 존재하는 요소중 실제 클릭가능한 요소만 필터링 합니다"""
+        visibles:list[PlaywrightLocator] = []
+        for l in locators:
+            try: await l.click(trial=True, timeout=300) # 실제 클릭가능한지 시도해봄
+            except: continue
+            visibles.append(l)
+        return visibles
+    @override
+    async def extract(self,frame:PlaywrightFrame)->list[PlaywrightLocator]:
+        return await self._filter_visible(await super().extract(frame))
+class LocatorManager:
+    def __init__(self, selector_include:list[str]|None, keyword_forbidden:list[str]|None, timeout: int = 5000, stable_ms: int = 500, interval: float = 0.2):
+        self.selector_include:list[str] = selector_include or ["a","li","span","div","p","button","input","textarea","select"]
+        self.keyword_forbidden:list[str] = keyword_forbidden or ["로그아웃", "logout", "signout", "exit", "나가기","비밀번호 변경", "회원탈퇴", "delete account"]
+        self.locator_nodes: list[LocatorNode]|None = None
+        self.timeout: int = timeout
+        self.stable_ms: int = stable_ms
+        self.interval: float = interval
+    async def _extract(self,frame:PlaywrightFrame)->list[PlaywrightLocator]:
+        """프레임에서 후보 요소들을 뽑아줍니다."""
+        selector_str = ", ".join(self.selector_include)
+        await frame.evaluate(
+            """
+            (args) => {
+                const { sel, keywords } = args;
+                const elements = document.querySelectorAll(sel);
+                elements.forEach(el => {
+                    const text =
+                        (el.innerText || "").toLowerCase();
+                    const href =
+                        (el.getAttribute("href") || "")
+                        .toLowerCase();
+                    const isForbidden =
+                        keywords.some(k =>
+                            text.includes(k) ||
+                            href.includes(k)
+                        );
+                    if (isForbidden)
+                        return;
+                    const hasText = Array.from(el.childNodes).some(node =>
+                        node.nodeType === 3 && node.textContent.trim().length > 0
                     );
+                    const isInteractive =
+                        el.matches(
+                            "button, input, textarea, select"
+                        );
+                    if (hasText || isInteractive) {
+                        el.classList.add(
+                            "mcp-clickable-target"
+                        );
+                    }
+                });
+            }
+            """,
+            {
+                "sel": selector_str,
+                "keywords": self.keyword_forbidden,
+            }
+        )
+        return (
+            await frame
+            .locator(".mcp-clickable-target")
+            .filter(visible=True)
+            .all()
+        )
+    async def _extract_stable(self,frame:PlaywrightFrame)->list[PlaywrightLocator]:
+        start_time = time.time()
+        last_locator_nodes:list[LocatorNode] = []
+        stable_start: float | None = None
 
-                if (hasText || isInteractive) {
-                    el.classList.add(
-                        "mcp-clickable-target"
-                    );
-                }
-            });
-        }
-        """,
-        {
-            "sel": selector_str,
-            "keywords": forbidden_keywords,
-        }
-    )
+        await frame.wait_for_load_state('domcontentloaded')
+        last_locator_nodes = [await LocatorNode.create(l) for l in await self._extract(frame)]
 
-    return (
-        frame
-        .locator(".mcp-clickable-target")
-        .filter(visible=True)
-    )
+        while True:
+            gap = (time.time() - start_time) * 1000
+            if gap > self.timeout:
+                print("[!] wait_dom_stable: 시간 초과 (현재 상태로 그냥 진행)", file=sys.stderr)
+                break
+            try:
+                current_locator_nodes = [await LocatorNode.create(l) for l in await self._extract(frame)]
+                next_locator_nodes:list[LocatorNode] = []
+                sm = difflib.SequenceMatcher(a=last_locator_nodes, b=current_locator_nodes, autojunk=False)
+                for tag, i1, i2, j1, j2 in sm.get_opcodes():
+                    if tag == "equal":
+                        for i in range(i2-i1):
+                            if last_locator_nodes[i1+i].locator == None: # 없어졌다가 다시 생긴 노드는 제외
+                                next_locator_nodes.append(last_locator_nodes[i1+i])
+                                continue
+                            # 계속 있던 노드들은 그대로 추가
+                            next_locator_nodes.append(current_locator_nodes[j1+i])
+                        continue
+                    if tag == "delete":
+                        for ln in last_locator_nodes[i1:i2]:
+                            ln.locator = None # 없어졌다는 표시...
+                        next_locator_nodes += last_locator_nodes[i1:i2]
+                        continue
+                    if tag == "insert": # 처음보는경우(생성된 경우는 일단 추가)
+                        next_locator_nodes += current_locator_nodes[j1:j2]
+                        continue
+                    if tag == "replace":
+                        next_locator_nodes += current_locator_nodes[j1:j2] # 새로생긴거는 추가
+                        for ln in last_locator_nodes[i1:i2]:               # 없어진거는 없어진거를 표시
+                            ln.locator = None # 없어졌다는 표시...
+                        next_locator_nodes += last_locator_nodes[i1:i2]
+                        continue
 
+                if next_locator_nodes == last_locator_nodes:
+                    if stable_start is None:
+                        stable_start = time.time()
+                    # 2. 지정된 시간(예: 500ms) 동안 변화가 없었다면 조건 충족
+                    if (time.time() - stable_start) * 1000 >= self.stable_ms:
+                        break  # 완전히 안정화됨
+                else:
+                    # 변화가 생겼다면 타이머를 초기화하고 최신 상태를 기록
+                    stable_start = None
+                    last_locator_nodes = next_locator_nodes
+            except Exception:
+                await asyncio.sleep(0.2)
+                continue
+            await asyncio.sleep(0.1)
+        return [i.locator for i in last_locator_nodes if i.locator != None]
+    async def _filter_clickable(self, locators:list[PlaywrightLocator])->list[PlaywrightLocator]:
+        """html에 존재하는 요소중 실제 클릭가능한 요소만 필터링 합니다"""
+        clickable:list[PlaywrightLocator] = []
+        for l in locators:
+            try: await l.click(trial=True, timeout=300) # 실제 클릭가능한지 시도해봄
+            except: continue
+            clickable.append(l)
+        return clickable
+    async def update_locators(self, frame: PlaywrightFrame):
+        locators: list[PlaywrightLocator]|list[LocatorNode]
+        # 처음만들때
+        if self.locator_nodes == None:
+            locators = await self._extract_stable(frame)      # 변하지 않는 로케이터들만 선택함
+            locators = await self._filter_clickable(locators) # 처음이므로 일일히 클릭가능한지 확인해줌
+            self.locator_nodes = [await LocatorNode.create(l) for l in locators]
+        else:
+            locators = [await LocatorNode.create(l) for l in await self._extract(frame)]
+            old_set = set(self.locator_nodes) # 기존에 구해놓은거를 활용,이것만 다시 구하면됨
+            new_set = set(locators)
+            while not old_set.issubset(new_set):
+                # 다시 추출 시도
+                locators = [await LocatorNode.create(l) for l in await self._extract(frame)]
+                old_set = set(self.locator_nodes)
+                new_set = set(locators)
+                await asyncio.sleep(self.interval)
+            new_map = {node: node for node in locators}
+            for old_node in self.locator_nodes:
+                new_node = new_map.get(old_node)
+                if new_node:
+                    old_node.locator = new_node.locator
+            
 class Base:
     async def wait_dom_stable(self, target: PlaywrightPage | PlaywrightFrame, timeout: int = 5000, stable_ms: int = 500) -> None:
         """DOM 내용과 아이프레임 개수가(페이지일 경우) 모두 멈출 때까지 대기합니다."""
@@ -126,16 +266,6 @@ class Base:
                 await asyncio.sleep(0.2)
                 continue
             await asyncio.sleep(0.1)
-
-    async def is_interactable(self, locator: PlaywrightLocator) -> bool:
-        """요소가 화면에 실제로 보이는 크기를 가지는지 확인합니다."""
-        try:
-            box = await locator.bounding_box()
-            if box is None:
-                return False
-            return box["width"] >= 3 and box["height"] >= 3
-        except Exception:
-            return False
 
 class Context:
     # context를 나타냄
@@ -177,7 +307,7 @@ class Context:
         self.session_path: str | None = session_path # 세션경로 
         self.pages: list[Page] = []                  # 자식페이지들
     
-    async def new_page(self, tag_extractor: Callable[[PlaywrightFrame], Any] = default_tag_extractor) -> "Page":
+    async def new_page(self, tag_extractor:TagExtractor) -> "Page":
         # page객체를 반환함
         # tag_extractor: Page에서 쓸 tag추출기
         n_page = Page(await self.context.new_page(), tag_extractor)
@@ -217,9 +347,9 @@ class Context:
 
 class Page(Base):
     # 페이지를 나타냄
-    def __init__(self, page: PlaywrightPage, tag_extractor: Callable[[PlaywrightFrame], Any]):
+    def __init__(self, page: PlaywrightPage, tag_extractor:TagExtractor):
         self.page: PlaywrightPage          = page
-        self.tag_extractor: Callable[[PlaywrightFrame], Any] = tag_extractor
+        self.tag_extractor:TagExtractor = tag_extractor
         self.records: list[Page_Record] = []     # 페이지 이동기록을 나타냄, goto로 이동시 초기화됨
         self.current_pos: int = 0                       # records[-1]에서 현재 상태 위치
 
@@ -419,19 +549,19 @@ class Fill(Command):
 class Frame(Base):
     # iframe+메인프레임을 나타냄
     @classmethod
-    async def create(cls, frame: PlaywrightFrame, tag_extractor: Callable[[PlaywrightFrame], Any]) -> "Frame":
+    async def create(cls, frame: PlaywrightFrame, tag_extractor:TagExtractor) -> "Frame":
         temp = Frame(frame, tag_extractor)
         # 초기화
         await temp.update_locator_nodes()
         return temp
     async def update_locator_nodes(self) -> None:
-        nodes = await self.tag_extractor(self.frame)
-        count = await nodes.count()
-        self.locator_nodes = [await LocatorNode.create(nodes.nth(i)) for i in range(count)]
-    def __init__(self, frame: PlaywrightFrame, tag_extractor: Callable[[PlaywrightFrame], Any]):
-        self.frame: PlaywrightFrame                     = frame
-        self.tag_extractor: Callable[[PlaywrightFrame], Any]             = tag_extractor
-        self.locator_nodes: list[LocatorNode]      = []         # tag_extractor로 추출한 locators, 인덱스로 접근함
+        nodes = await self.tag_extractor.extract(self.frame)
+        # count = await nodes.count()
+        self.locator_nodes = [await LocatorNode.create(node) for node in nodes]
+    def __init__(self, frame: PlaywrightFrame, tag_extractor:TagExtractor):
+        self.frame: PlaywrightFrame           = frame
+        self.tag_extractor:TagExtractor       = tag_extractor
+        self.locator_nodes: list[LocatorNode] = []         # tag_extractor로 추출한 locators, 인덱스로 접근함
         self.url: str = frame.url                # 프레임의 주소
     async def _update_frame_state(self) -> bool:
         await self.wait_dom_stable(self.frame)
@@ -457,7 +587,7 @@ class LocatorNode: # Locator + Command
         self.value: str = value
         self.placeholder: str = placeholder
         self.href: str = href
-        self.locator: PlaywrightLocator = locator
+        self.locator: PlaywrightLocator|None = locator
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, LocatorNode):
             return NotImplemented

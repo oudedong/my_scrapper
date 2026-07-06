@@ -3,7 +3,7 @@ import sys
 from collections import deque
 from typing import Any, override
 
-from .browser_session import LocatorNode, PageInfo, Page, Context
+from .browser_session import LocatorNode, PageInfo, Page, Context, NotCoveredTagExtractor
 
 from abc import ABC, abstractmethod
 
@@ -290,7 +290,7 @@ class Redirected_page_solver(ABC):
         try:
             # solver로 해결시도
             context = await Context.create(self.session_path)
-            page = await context.new_page()
+            page = await context.new_page(NotCoveredTagExtractor())
             await self._solve(page, data)
             # url변화시 성공으로 간주
             page_info = await page.get_page_info()
