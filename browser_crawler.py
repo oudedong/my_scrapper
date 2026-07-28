@@ -3,7 +3,7 @@ import sys
 from collections import deque
 from typing import Any, override
 
-from .browser_session import LocatorNode, PageInfo, Page, Context, Page_Record
+from .browser_session import LocatorNode, PageInfo, Page, Context, Page_State
 
 from abc import ABC, abstractmethod
 from typing import cast
@@ -132,10 +132,10 @@ class DynamicClickExplorer:
                 continue
             f_idx, l_idx = candidate
             try:
-                print(f"클릭시도:{cast(Page_Record,self.page._get_current_record()).get_last_frames()[f_idx].locator_manager.locator_nodes[l_idx].values()}")
+                print(f"클릭시도:{self.page._get_current_state().get_current_state().second[f_idx].locator_manager.locator_nodes[l_idx].values()}")
                 await self.page.click_locator(f_idx,l_idx) # 시간초과 등등 무시하고 계속 ㄱㄱ
             except Exception as e:
-                print(f"클릭실패:{cast(Page_Record,self.page._get_current_record()).get_last_frames()[f_idx].locator_manager.locator_nodes[l_idx].values()}")
+                print(f"클릭실패:{self.page._get_current_state().get_current_state().second[f_idx].locator_manager.locator_nodes[l_idx].values()}")
                 continue
 
             new_page_info = await self.page.get_page_info()
