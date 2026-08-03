@@ -4,7 +4,7 @@ import time, difflib
 from playwright.async_api import async_playwright, Page as PlaywrightPage, Frame as PlaywrightFrame, Locator as PlaywrightLocator, Playwright, Browser, BrowserContext
 import sys
 from .html_cleaner import clean_html, recursive_iframe_replace
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 from typing import Any, override, cast, Generic, TypeVar
 from abc import ABC, abstractmethod
 
@@ -17,16 +17,29 @@ T2 = TypeVar("T2")
 class Pair(Generic[T1, T2]):
     first: T1
     second: T2
+@dataclass
+class StabilityConfig:
+    timeout: int = 5000
+    stable_ms: int = 500
+    interval: float = 0.2
+@dataclass
+class LocatorConfig:
+    selector_include: list[str] = field(
+        default_factory=lambda: ["a", "li", "span", "div", "p", "button", "input", "textarea", "select"]
+    )
+    keyword_forbidden: list[str] = field(
+        default_factory=lambda: ["로그아웃", "logout", "signout", "exit", "나가기", "비밀번호 변경", "회원탈퇴", "delete account"]
+    )
 
 class LocatorManager:
     def __init__(self, 
                  stable_nodes: list[LocatorNode],
                  locator_nodes: list[LocatorNode], 
                  selector_include:list[str], 
-                 keyword_forbidden:list[str], 
-                 timeout: int = 5000, 
-                 stable_ms: int = 500, 
-                 interval: float = 0.2):
+                 keyword_forbidden:list[str],
+                 timeout, 
+                 stable_ms, 
+                 interval):
         self._selector_include:list[str] = selector_include
         self._keyword_forbidden:list[str] = keyword_forbidden
         self.locator_nodes: list[LocatorNode] = locator_nodes
@@ -177,24 +190,25 @@ class LocatorManager:
     @classmethod
     async def create(cls, 
                      frame:PlaywrightFrame, 
-                     selector_include:list[str]|None = None, 
-                     keyword_forbidden:list[str]|None = None, 
-                     timeout: int = 5000, 
-                     stable_ms: int = 500, 
-                     interval: float = 0.2):
+                     locator_configs:LocatorConfig, 
+                     stable_configs:StabilityConfig):
         """
         LocatorManager을 생성,초기화
         """
-        selector_include  = selector_include or ["a","li","span","div","p","button","input","textarea","select"]
-        keyword_forbidden = keyword_forbidden or ["로그아웃", "logout", "signout", "exit", "나가기","비밀번호 변경", "회원탈퇴", "delete account"]
 
-        stable_nodes = await cls._extract_stable(frame,timeout,stable_ms,selector_include,keyword_forbidden)
+        stable_nodes = await cls._extract_stable(
+            frame,
+            stable_configs.timeout,stable_configs.stable_ms,
+            locator_configs.selector_include,locator_configs.keyword_forbidden
+        )
         clickable_nodes = await cls._filter_clickable(stable_nodes)
 
         stable_nodes = await cls._locators_to_locatorNodes(stable_nodes)
         clickable_nodes = await cls._locators_to_locatorNodes(clickable_nodes)
 
-        return LocatorManager(stable_nodes,clickable_nodes,selector_include, keyword_forbidden, timeout, stable_ms, interval)
+        return LocatorManager(stable_nodes,clickable_nodes,
+                              locator_configs.selector_include, locator_configs.keyword_forbidden, 
+                              stable_configs.timeout, stable_configs.stable_ms, stable_configs.interval)
     
 class Context:
 
@@ -285,6 +299,68 @@ class Page:
         """버퍼에 실행할 명령중 마지막을 제거함"""
         if len(self.command_buffer) > 0:     # 현재 record가 비어있다면
             self.command_buffer.pop()
+    @classmethod
+    async def _extract_stable_frames(cls,page:PlaywrightPage, _timeout, _stable_ms)->list[PlaywrightFrame]:
+        """
+        안정된 프레임들을 추출합니다.
+        """    
+        await page.wait_for_load_state('domcontentloaded')
+        last_frames:list[Pair] = [Pair(id(f),False) for f in page.frames]
+        refs = {f.first:f.second for f in last_frames} # 프레임객체가 gc안되게 잡아둘 딕셔너리
+        start_time = time.time()
+        stable_start: float | None = None
+
+        while True:
+            gap = (time.time() - start_time) * 1000
+            if gap > _timeout:
+                print(f"[!] _extract_stable_frames: 시간 초과(gap={gap}) (현재 상태로 그냥 진행)", file=sys.stderr)
+                break
+            try:
+                f_temp = page.frames
+                current_frames = [id(f) for f in f_temp]
+                for i in range(len(current_frames)):
+                    refs[current_frames[i]] = f_temp[i]
+                next_frames:list[Pair] = []
+                sm = difflib.SequenceMatcher(a=[p.first for p in last_frames], b=current_frames, autojunk=False)
+                for tag, i1, i2, j1, j2 in sm.get_opcodes():
+                    if tag == "equal":
+                        for i in range(i2-i1):
+                            if last_frames[i1+i].second == True: # 없어졌다가 다시 생긴 프레임은 제외
+                                next_frames.append(last_frames[i1+i])
+                                continue
+                            # 계속 있던 프레임들은 그대로 추가
+                            next_frames.append(Pair(current_frames[j1+i],False))
+                        continue
+                    if tag == "delete":
+                        for ln in last_frames[i1:i2]:
+                            ln.second = True # 없어졌다는 표시...
+                        next_frames += last_frames[i1:i2]
+                        continue
+                    if tag == "insert": # 처음보는경우(생성된 경우는 일단 추가)
+                        next_frames += [Pair(n,False) for n in current_frames[j1:j2]]
+                        continue
+                    if tag == "replace":
+                        next_frames += [Pair(n,False) for n in current_frames[j1:j2]] # 새로생긴거는 추가
+                        for ln in last_frames[i1:i2]:               # 없어진거는 없어진거를 표시
+                            ln.second = True # 없어졌다는 표시...
+                        next_frames += last_frames[i1:i2]
+                        continue
+
+                if next_frames == last_frames:
+                    if stable_start is None:
+                        stable_start = time.time()
+                    # 2. 지정된 시간(예: 500ms) 동안 변화가 없었다면 조건 충족
+                    if (time.time() - stable_start) * 1000 >= _stable_ms:
+                        break  # 완전히 안정화됨
+                else:
+                    # 변화가 생겼다면 타이머를 초기화하고 최신 상태를 기록
+                    stable_start = None
+                    last_frames = next_frames
+            except Exception:
+                await asyncio.sleep(0.2)
+                continue
+            await asyncio.sleep(0.1)
+        return [refs[i.first] for i in last_frames if not i.second]
     async def _goto_page_state(self, record_idx: int|None, state_idx: int|None):
         """record내 특정 페이지 상태로 이동합니다, 이때 명령버퍼는 초기화 됩니다."""
         # idx범위검사
@@ -302,6 +378,8 @@ class Page:
         cur_state.cut_at_idx(state_idx)
         # 상태복원
         await self.page.goto(cur_state.page_url) # 해당 페이지 상태의 url로 이동
+        configs = StabilityConfig()
+        stable_frames = await Page._extract_stable_frames(self.page, configs.timeout, configs.stable_ms)
         for pair in cur_state.command_frames:
             # 먼저 해당 상태의 프레임들 복원
             for frame_idx in range(len(pair.second)):
@@ -314,6 +392,7 @@ class Page:
         self.command_buffer = []
     async def _apply_commands_in_buffer(self):
         """커맨드 버퍼내에 명령들을 적용시킵니다. 중간에 실패하면 그 뒤의 커맨드들은 무시됩니다. 성공한 커맨드와, 상태는 record에 기록됩니다."""
+        configs = StabilityConfig()
         # 현재 상태를 가져옴
         current_state = self._get_current_state()
         # 버퍼가 비어있는경우 바로 탈출
@@ -322,12 +401,12 @@ class Page:
         for command in self.command_buffer:
             current_frames = current_state.get_current_state().second # 현재 상태의 frame들
             await command.do(current_frames)
-            # 뭔가 대기하는코드를 추가해 줘야됨...
-            await asyncio.sleep(5) # debug===================================================
+            # 프레임 대기
+            stable_frames = await Page._extract_stable_frames(self.page, configs.timeout, configs.stable_ms)
             # url이 변한경우: 새로운 state를 리스트에 붙여줌
             if self.page.url != current_state.page_url:
                 new_state = Page_State(
-                    [await Frame.create(frame) for frame in self.page.frames],
+                    [await Frame.create(frame) for frame in stable_frames],
                     command,
                     self.page.url,
                     await self.page.title(),
@@ -358,10 +437,13 @@ class Page:
     async def goto(self, url: str) -> None:
         # 페이지 이동
         await self.page.goto(url, wait_until="domcontentloaded")
+        configs = StabilityConfig()
+        # 프레임 대기
+        stable_frames = await Page._extract_stable_frames(self.page, configs.timeout, configs.stable_ms)
         self.records = [] # 기록 초기화
         self.records.append(
             Page_State(
-                [await Frame.create(frame) for frame in self.page.frames], 
+                [await Frame.create(frame) for frame in stable_frames], 
                 None,
                 self.page.url,
                 await self.page.title(),
@@ -502,7 +584,7 @@ class Frame:
     @classmethod
     async def create(cls, frame: PlaywrightFrame) -> "Frame":
         # 초기화
-        locator_manager = await LocatorManager.create(frame)
+        locator_manager = await LocatorManager.create(frame, LocatorConfig(), StabilityConfig())
         return Frame(frame.url, frame.name, locator_manager)
     def __init__(self, init_url:str,init_name:str, locator_manager:LocatorManager):
         self.locator_manager:LocatorManager   = locator_manager
