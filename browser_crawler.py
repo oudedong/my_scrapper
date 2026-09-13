@@ -86,11 +86,10 @@ class DynamicClickExplorer:
         while True:
             candidate = None
             if self._click_candidates == None:
-                # 처음이라면 초기화
+                # 처음이라면 스택 초기화
                 init_indexed_locators = await self._get_indexed_locators(self._page)
                 self._click_candidates = deque(init_indexed_locators)
-                continue
-            elif len(self._click_candidates) > 0:
+            if len(self._click_candidates) > 0:
                 candidate = self._click_candidates.pop()
             else:
                 if len(self._urls_queue) <= 0:
@@ -98,7 +97,7 @@ class DynamicClickExplorer:
                 url, depth = self._urls_queue.popleft() # 큐에서 다음으로 탐색할 url을 꺼냄
                 await self._page.goto(url)              # 이동 후 스택 초기화
                 self._depth = depth
-                init_indexed_locators = None
+                self._click_candidates = None
                 continue
             if candidate in (0,1): # 뭔가 변화가 발생한 경계이므로 되돌림
                 await self._page.undo()
@@ -118,12 +117,12 @@ class DynamicClickExplorer:
             if not is_changed:# 변화없으면 다음꺼
                 continue
             
-            after_indexed_locators = await self._get_indexed_locators(self._page)
             if self._page.page_changed:
                 self._click_candidates.append(1)
                 self._urls_queue.append((self._page.page.url, self._depth+1))
                 return 1
         
+            after_indexed_locators = await self._get_indexed_locators(self._page)
             new, disappeared = self._diff(init_indexed_locators, after_indexed_locators)
             if len(new) <= 0 and len(disappeared) > 0: # 사라지기만 하면 다시 되돌림(오히려 탐색할 수 있는게 줄어드므로)
                 await self._page.undo()
@@ -156,7 +155,7 @@ class DynamicURLExplorer:
         self._max_depth = max_depth
 
     def _is_max_depth(self) -> bool:
-        return self._dynamic_click_explorer.get_depth() >= self._max_depth
+        return self._dynamic_click_explorer.get_depth() > self._max_depth
 
     async def do_recursivly(self):
         page_info = await self.page.get_page_info()
@@ -166,7 +165,8 @@ class DynamicURLExplorer:
         while True:
             while self._is_max_depth():
                 if not await self._dynamic_click_explorer.abort():
-                    return
+                    break
+                    # return
             print("hererererer")
             ret_next = await self._dynamic_click_explorer.next()
             if ret_next == 0: # 더 이상 갈곳이 없으면 종료

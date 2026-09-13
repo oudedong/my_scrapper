@@ -277,7 +277,7 @@ class LocatorManager:
             locator_configs.keyword_forbidden
         )
         stable_nodes = await cls._locators_to_locatorNodes(stable_nodes)
-        clickable_nodes = await cls._filter_clickable(stable_nodes)
+        clickable_nodes = await cls._filter_clickable(stable_nodes) # 게으른 방식으로 하기?
 
         return LocatorManager(
             stable_nodes,
