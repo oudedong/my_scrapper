@@ -38,7 +38,8 @@ class LocatorNode:
         self.placeholder: str = placeholder
         self.href: str = href
         self.locator: PlaywrightLocator = locator
-        self.is_available: bool = True
+        self._is_available: bool = True
+        self._is_excluded: bool = False # 커맨드 실패기록이 있는지
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, LocatorNode):
@@ -65,18 +66,22 @@ class LocatorNode:
         return LocatorNode(**infos, locator=locator)
 
     async def click(self) -> None:
-        await self.locator.click(timeout=5000)
+        await self.locator.click(timeout=1500)
 
     async def fill(self, content: str) -> None:
         await self.locator.fill(content)
     def is_alive(self) -> bool:
-        return self.is_available
+        return self._is_available
+    def is_excluded(self) -> bool:
+        return self._is_excluded
+    def exclude(self)->None:
+        self._is_excluded = True
     def restore(self, locator: PlaywrightLocator|None):
         if locator == None:
-            self.is_available = False
+            self._is_available = False
         else:
             self.locator = locator
-            self.is_available = True
+            self._is_available = True
 
     @classmethod
     def keys(cls) -> list[str]:
@@ -251,7 +256,9 @@ class LocatorManager:
         for locator_node in self.locator_nodes:
             locator_node.restore(new_map.get(locator_node))
             # print(f"[!] {locator_node} is not found in the current frame.")
-
+    def exclude_locators(self, l_idxs:list[int])->None:
+        for l_idx in l_idxs:
+            self.locator_nodes[l_idx].exclude()
     @override
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, LocatorManager):

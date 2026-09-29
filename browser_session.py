@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import difflib
+from math import e
 import sys
 import time
 from dataclasses import dataclass
@@ -134,6 +135,11 @@ class Context:
         # 세션저장
         await self.context.storage_state(path=self.session_path)
 
+class FrameRestoreError(Exception):
+    """상태 복원 중 커맨드 재생이 실패해서, 해당 지점부터 더 이상 복원할 수 없음을 나타냄"""
+    def __init__(self, message: str, failed_steps: int):
+        super().__init__(message)
+        self.failed_steps = failed_steps  # 재생 못 한(실패 지점부터 끝까지) pair 개수
 
 class Page:
     # 페이지를 나타냄
@@ -277,16 +283,28 @@ class Page:
         # 상태복원
         await self.page.goto(cur_state.page_url)  # 해당 페이지 상태의 url로 이동
         configs = StabilityConfig()
-        for pair in cur_state.command_frames:
+        total_pairs = len(cur_state.command_frames)
+        for i, pair in enumerate(cur_state.command_frames):
+            # 현재프레임들 상태 복구
             stable_frames = await Page._extract_stable_frames(self.page, configs.timeout, configs.stable_ms)
             stable_frames = Page._filter_unidentifiable_frames(stable_frames)
-            # 현재프레임들 상태 복구
             new_frames_dict = {get_clean_url(f.url): f for f in stable_frames}
             for cur_frame in pair.second:
                 await cur_frame.restore(new_frames_dict.get(cur_frame.init_url))
             if pair.first is not None:
                 # 복구후 커맨드 실행
-                await pair.first.do(pair.second)
+                try:
+                    await pair.first.do(pair.second)
+                except Exception as e: # 끝까지 복원 실패한경우
+                    failed_action = pair.first.action
+                    # 실제로 도달한 건 딱 이 pair(i번째)까지이므로, 기록도 거기까지로 되돌림(현재 복원한데 까지만 남김)
+                    cur_state.command_frames = cur_state.command_frames[:i + 1]
+                    cur_state.command_frames[-1].first = None  # 여기서 더 못 나간다는 표시
+                    failed_steps = total_pairs - i - 1 # i번째(0-indexed)부터 끝까지 못 감 -> 실패 개수
+                    raise FrameRestoreError(
+                        f"복원 중 커맨드 재생 실패 (i={i}/{total_pairs}): {failed_action} ({e})",
+                        failed_steps=failed_steps
+                    ) from e
 
     async def _apply_commands_in_buffer(self)->bool:
         """뭔가 변화가 있으면(페이지,로케이터) True반환"""
@@ -306,12 +324,15 @@ class Page:
             current_frames = current_state.get_current_state().second
             try:
                 await command.do(current_frames)
-                # await asyncio.sleep(2) # 디버깅용------------------------------
-            except Exception:
+            except Exception as e:
                 if is_same_page_url(self.page.url, current_state.page_url):
-                    raise
+                    print(f"알수없는 이유로 커맨드 실행이 실패함, 실패한 로케이터를 표시하고 건너뜀\ne:{e}")
+                    f_idxs, l_idxs = command.frame_idxs, command.locator_idxs # 제외할 것들(여러개가 있을때, 앞에꺼 하나 실패했는데도 뒤에것도 다 제외하는 문제 발생가능..)
+                    for f_idx, l_idx in zip(f_idxs, l_idxs):
+                        current_frames[f_idx].locator_manager.exclude_locators([l_idx])
+                    continue
 
-            # --- 성공했든, 예외났지만 네비게이션됐든 공통으로 결과 반영 ---
+            # 성공했든, 예외났지만 네비게이션됐든 공통으로 결과 반영
             stable_frames = await Page._extract_stable_frames(self.page, configs.timeout, configs.stable_ms)
             stable_frames = Page._filter_unidentifiable_frames(stable_frames)
 
@@ -360,6 +381,7 @@ class Page:
                 last_frame = last_frames_dict[new_frame.init_url]
                 if new_frame != last_frame:
                     print("locator changed")
+                    print(f"new/last: {new_frame}/{last_frame}")
                     last_state = current_state.get_current_state()
                     last_state.first = command # 해당 프레임에서 어떤 커맨드 실행했는지 저장
                     current_state.append_state(
@@ -503,6 +525,8 @@ class Frame:
             return
         await self.locator_manager.restore(frame)
         self.is_available = True
+    def exclude_locators(self,l_idxs:list[int])->None:
+        self.locator_manager.exclude_locators(l_idxs)
 
     def get_frame_info(self) -> "FrameInfo":
         return FrameInfo(self.init_url, self.is_available, self.locator_manager.locator_nodes or [])  # 마지막 로케이터들 반환

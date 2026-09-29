@@ -47,6 +47,9 @@ class Command(ABC):
             # 유효한 로케이터인지 확인
             if not nodes[l_idx].is_alive():
                 raise Exception(f"frame {f_idx} locator {l_idx} is not alive")
+            # 제외된 로케이터라면 그냥 무시
+            if nodes[l_idx].is_excluded():
+                return
             await self._do(nodes[l_idx])
 
 

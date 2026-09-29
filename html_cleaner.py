@@ -18,20 +18,35 @@ def replace_content_first(content: str, replace_content: str, tag: str) -> str:
     return str(soup)
 
 
-async def recursive_iframe_replace(root: PlaywrightFrame) -> str:
-    """재귀적으로 iframe 요소를 찾아 실제 내용으로 치환합니다."""
-    child_iframes = root.child_frames
-    content = await root.content()
+import uuid
 
-    for iframe in child_iframes:
-        if iframe.is_detached():  # 이미 분리된 프레임은 스킵
+async def recursive_iframe_replace(root: PlaywrightFrame) -> str:
+    """각 iframe 태그 안에 그 프레임 자신의 내용을 넣습니다."""
+    markers: dict[str, PlaywrightFrame] = {}
+    for child in root.child_frames:
+        if child.is_detached():
             continue
-        content = replace_content_first(
-            content,
-            await recursive_iframe_replace(iframe),
-            'iframe'
-        )
-    return content
+        try:
+            element = await child.frame_element()       # 부모 문서 안의 <iframe> 요소
+            marker = uuid.uuid4().hex
+            await element.evaluate("(el, m) => el.setAttribute('data-mcp-frame', m)", marker)
+            markers[marker] = child
+        except Exception:
+            continue                                     # 그 사이 사라진 프레임은 건너뜀
+
+    content = await root.content()                       # 표식이 심어진 뒤에 스냅샷
+    if not markers:
+        return content
+
+    soup = BeautifulSoup(content, "html.parser")         # 부모 문서는 한 번만 파싱
+    for marker, child in markers.items():
+        target = soup.find(["iframe", "frame"], attrs={"data-mcp-frame": marker})
+        if target is None:
+            continue
+        child_html = await recursive_iframe_replace(child)   # 중첩 iframe은 재귀로 처리
+        target.append(BeautifulSoup(child_html, "html.parser"))
+        del target["data-mcp-frame"]                     # 결과물에는 표식을 남기지 않음
+    return str(soup)
 
 
 def _remove_tags(html_content: str) -> str:
