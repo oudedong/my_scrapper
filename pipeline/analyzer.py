@@ -4,11 +4,11 @@ from typing import TYPE_CHECKING
 
 from bs4 import BeautifulSoup
 
+from ..core.locator import LocatorNode
 from .html_cleaner import clean_html
-from .locator import LocatorNode
 
 if TYPE_CHECKING:
-    from .browser_session import Page
+    from ..core.session import Page
 
 __all__ = [
     "PageAnalyzer",
@@ -62,7 +62,7 @@ class PageAnalyzer:
             f"Page Title: {page_info.title}",
             f"Frame Count: {len(frame_infos)}",
             f"Locator Header: {'|'.join((['index', 'alive', 'excluded'] + LocatorNode.keys()))}",
-            ""
+            "",
         ]
         for i, frameInfo in enumerate(frame_infos):
             frame_status = "ALIVE" if frameInfo.is_available else "DEAD"
@@ -71,15 +71,10 @@ class PageAnalyzer:
                 if not show_dead and not locator_node.is_alive():
                     continue
                 loc_status = "O" if locator_node.is_alive() else "X"
-                line = ", ".join(locator_node.values())
                 loc_excluded = "O" if locator_node.is_excluded() else "X"
                 line = ", ".join(locator_node.values())
-                result_frame.append(
-                    f"  [{j}][{loc_status}][{loc_excluded}] {line}"
-                )
+                result_frame.append(f"  [{j}][{loc_status}][{loc_excluded}] {line}")
             result_frame.append("")
             result_frame_str = "\n".join(result_frame)
-            result.append(
-                f"[Frame {i}]\n{result_frame_str}"
-            )
+            result.append(f"[Frame {i}]\n{result_frame_str}")
         return "\n".join(result)

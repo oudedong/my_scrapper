@@ -26,11 +26,13 @@ class Pair(Generic[T1, T2]):
     first: T1
     second: T2
 
+
 @dataclass
 class StabilityConfig:
     timeout: int = 5000
     stable_ms: int = 1000
     interval: float = 0.2
+
 
 @dataclass
 class LocatorConfig:
@@ -41,7 +43,9 @@ class LocatorConfig:
         default_factory=lambda: ["로그아웃", "logout", "signout", "exit", "나가기", "비밀번호 변경", "회원탈퇴", "delete account"]
     )
 
+
 class LocatorNode:
+
     def __init__(self, tag: str, text: str, value: str, placeholder: str, href: str, locator: PlaywrightLocator):
         self.tag: str = tag
         self.text: str = text
@@ -50,7 +54,7 @@ class LocatorNode:
         self.href: str = href
         self.locator: PlaywrightLocator = locator
         self._is_available: bool = True
-        self._is_excluded: bool = False # 커맨드 실패기록이 있는지
+        self._is_excluded: bool = False  # 커맨드 실패기록이 있는지
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, LocatorNode):
@@ -82,14 +86,18 @@ class LocatorNode:
 
     async def fill(self, content: str) -> None:
         await self.locator.fill(content)
+
     def is_alive(self) -> bool:
         return self._is_available
+
     def is_excluded(self) -> bool:
         return self._is_excluded
-    def exclude(self)->None:
+
+    def exclude(self) -> None:
         self._is_excluded = True
-    def restore(self, locator: PlaywrightLocator|None):
-        if locator == None:
+
+    def restore(self, locator: PlaywrightLocator | None):
+        if locator is None:
             self._is_available = False
         else:
             self.locator = locator
@@ -102,15 +110,19 @@ class LocatorNode:
     def values(self) -> list[str]:
         return [self.tag, self.text, self.value, self.placeholder, self.href]
 
+
 class LocatorManager:
-    def __init__(self, 
-                 stable_nodes: list[LocatorNode],
-                 locator_nodes: list[LocatorNode], 
-                 selector_include: list[str], 
-                 keyword_forbidden: list[str],
-                 timeout: int, 
-                 stable_ms: int, 
-                 interval: float):
+
+    def __init__(
+        self,
+        stable_nodes: list[LocatorNode],
+        locator_nodes: list[LocatorNode],
+        selector_include: list[str],
+        keyword_forbidden: list[str],
+        timeout: int,
+        stable_ms: int,
+        interval: float,
+    ):
         self._selector_include: list[str] = selector_include
         self._keyword_forbidden: list[str] = keyword_forbidden
         self.locator_nodes: list[LocatorNode] = locator_nodes
@@ -159,7 +171,7 @@ class LocatorManager:
             {
                 "sel": selector_str,
                 "keywords": _keyword_forbidden,
-            }
+            },
         )
         return (
             await frame
@@ -169,11 +181,18 @@ class LocatorManager:
         )
 
     @classmethod
-    async def _extract_stable(cls, frame: PlaywrightFrame, _timeout: int, _stable_ms: int, _selector_include: list[str], _keyword_forbidden: list[str]) -> list[PlaywrightLocator]:
+    async def _extract_stable(
+        cls,
+        frame: PlaywrightFrame,
+        _timeout: int,
+        _stable_ms: int,
+        _selector_include: list[str],
+        _keyword_forbidden: list[str],
+    ) -> list[PlaywrightLocator]:
         last_locator_nodes: list[Pair[LocatorNode, bool]] = []
         stable_start: float | None = None
 
-        await frame.wait_for_load_state('domcontentloaded')
+        await frame.wait_for_load_state("domcontentloaded")
         last_locator_nodes = [Pair(await LocatorNode.create(l), False) for l in await cls._extract(frame, _selector_include, _keyword_forbidden)]
         start_time = time.time()
 
@@ -248,11 +267,9 @@ class LocatorManager:
                 continue  # 그 사이 사라진/밀린 요소는 건너뜀
         return nodes
 
-    async def restore(self, frame: PlaywrightFrame|None) -> None:
-        """
-        입력받은 프레임으로 갱신함!
-        """
-        if frame == None: # 전부 죽음 처리
+    async def restore(self, frame: PlaywrightFrame | None) -> None:
+        """입력받은 프레임으로 갱신함!"""
+        if frame is None:  # 전부 죽음 처리
             for locator_node in self.locator_nodes:
                 locator_node.restore(None)
             return
@@ -262,47 +279,41 @@ class LocatorManager:
         )
         new_stable_locator_nodes = await self._locators_to_locatorNodes(new_stable_locators)
 
-        # 기존 stable 로케이터와 비교(set이용)
-        # old_set = set(self.locator_nodes)
-        # new_set = set(new_stable_locator_nodes)
-        # result = old_set <= new_set  # 새 집합에 기존 로케이터들이 전부 포함되어있으면 허용
-
-        # 같다면 로케이터들 갱신
         # 같은 시그니처의 로케이터가 여러개 있으면 마지막꺼만 남아버림...
-        new_map = {new_locator_node: new_locator_node.locator for new_locator_node in new_stable_locator_nodes} # 기존 로케이터들
-        # 전체로케이터 갱신->stable_nodes하고 clickable_nodes하고 같은 locator_nodes를 공유하므로, stable_nodes만 갱신하면 clickable_nodes도 갱신됨
+        new_map = {new_locator_node: new_locator_node.locator for new_locator_node in new_stable_locator_nodes}  # 기존 로케이터들
+        # 전체로케이터 갱신
         for locator_node in self.locator_nodes:
             locator_node.restore(new_map.get(locator_node))
-            # print(f"[!] {locator_node} is not found in the current frame.")
-    def exclude_locators(self, l_idxs:list[int])->None:
+
+    def exclude_locators(self, l_idxs: list[int]) -> None:
         for l_idx in l_idxs:
             self.locator_nodes[l_idx].exclude()
+
     @override
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, LocatorManager):
             return NotImplemented
-        # self_set = frozenset(self._stable_nodes)
-        # other_set = frozenset(other._stable_nodes)
         self_set = frozenset(self.locator_nodes)
         other_set = frozenset(other.locator_nodes)
         return self_set == other_set
 
     @classmethod
-    async def create(cls, 
-                     frame: PlaywrightFrame, 
-                     locator_configs: LocatorConfig, 
-                     stable_configs: StabilityConfig) -> "LocatorManager":
-        """
-        LocatorManager을 생성,초기화
-        """
+    async def create(
+        cls,
+        frame: PlaywrightFrame,
+        locator_configs: LocatorConfig,
+        stable_configs: StabilityConfig,
+    ) -> "LocatorManager":
+        """LocatorManager을 생성,초기화"""
         stable_nodes = await cls._extract_stable(
             frame,
-            stable_configs.timeout, stable_configs.stable_ms,
+            stable_configs.timeout,
+            stable_configs.stable_ms,
             locator_configs.selector_include,
-            locator_configs.keyword_forbidden
+            locator_configs.keyword_forbidden,
         )
         stable_nodes = await cls._locators_to_locatorNodes(stable_nodes)
-        clickable_nodes = await cls._filter_clickable(stable_nodes) # 게으른 방식으로 하기?
+        clickable_nodes = await cls._filter_clickable(stable_nodes)
 
         return LocatorManager(
             stable_nodes,
@@ -311,5 +322,5 @@ class LocatorManager:
             locator_configs.keyword_forbidden,
             stable_configs.timeout,
             stable_configs.stable_ms,
-            stable_configs.interval
+            stable_configs.interval,
         )

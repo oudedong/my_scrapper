@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, override
 from .locator import LocatorNode
 
 if TYPE_CHECKING:
-    from .browser_session import Frame
+    from .session import Frame
 
 __all__ = [
     "Command",
@@ -63,6 +63,7 @@ class Command(ABC):
 
 
 class Click(Command):
+
     def __init__(self, frame_idxs: int | list[int], locator_idxs: int | list[int], **kwargs: Any):
         super().__init__(frame_idxs, locator_idxs, **kwargs)
         self.action = "click"
@@ -81,6 +82,7 @@ class Click(Command):
 
 
 class Fill(Command):
+
     def __init__(self, frame_idxs: int | list[int], locator_idxs: int | list[int], **kwargs: Any):
         super().__init__(frame_idxs, locator_idxs, **kwargs)
         self.action = "fill"
@@ -95,8 +97,8 @@ class Fill(Command):
     @override
     async def _do(self, target: LocatorNode) -> None:
         # fill또는 제출버튼 click중 선택
-        cur_job = lambda: target.fill(self.kwargs['contents'][self.cur_idx])
-        if self.kwargs.get('last_is_submit'):
+        cur_job = lambda: target.fill(self.kwargs["contents"][self.cur_idx])
+        if self.kwargs.get("last_is_submit"):
             if self.cur_idx == len(self.locator_idxs) - 1:
                 cur_job = lambda: target.click()
         # 선택한 명령 실행

@@ -1,48 +1,48 @@
-from .analyzer import PageAnalyzer
-from .browser_crawler import (
-    ContentCollector,
+from .core import (
+    Click,
+    Command,
+    Context,
+    Fill,
+    Frame,
+    FrameInfo,
+    FrameRestoreError,
+    LocatorConfig,
+    LocatorManager,
+    LocatorNode,
+    Page,
+    PageInfo,
+    Page_State,
+    Pair,
+    StabilityConfig,
+)
+from .crawler import (
     DynamicClickExplorer,
     DynamicURLExplorer,
     Global_visit_page_url,
     Global_visit_set_page_url,
     IndexedLocatorInfo,
-    PageContentCollector,
-    SimpleContentCollector,
     SimpleUrlsCollector,
     SimpleUrlsProvider,
     UrlsCollector,
     UrlsProvider,
 )
-from .browser_session import (
-    Context,
-    Frame,
-    FrameInfo,
-    FrameRestoreError,
-    Page,
-    PageInfo,
-    Page_State,
-)
-from .commands import Click, Command, Fill
-from .html_cleaner import (
+from .pipeline import (
+    ContentCollector,
+    PageAnalyzer,
+    PageContentCollector,
+    SimpleContentCollector,
     clean_html,
     recursive_iframe_replace,
     replace_content_first,
 )
-from .locator import (
-    LocatorConfig,
-    LocatorManager,
-    LocatorNode,
-    Pair,
-    StabilityConfig,
-)
-from .urls import (
+from .utils import (
     get_clean_url,
     get_redirection_clean_url,
     is_same_page_url,
 )
 
 __all__ = [
-    # Session & Page
+    # Core (Session, Page, Frame, Locator, Commands)
     "Context",
     "Frame",
     "FrameInfo",
@@ -50,37 +50,34 @@ __all__ = [
     "Page",
     "PageInfo",
     "Page_State",
-    # Locator
     "LocatorConfig",
     "LocatorManager",
     "LocatorNode",
     "Pair",
     "StabilityConfig",
-    # Commands
     "Click",
     "Command",
     "Fill",
-    # Analyzer
-    "PageAnalyzer",
-    # HTML Cleaner
-    "clean_html",
-    "recursive_iframe_replace",
-    "replace_content_first",
-    # URLs
-    "get_clean_url",
-    "get_redirection_clean_url",
-    "is_same_page_url",
-    # Crawler & Explorer
-    "ContentCollector",
+    # Crawler
     "DynamicClickExplorer",
     "DynamicURLExplorer",
     "Global_visit_page_url",
     "Global_visit_set_page_url",
     "IndexedLocatorInfo",
-    "PageContentCollector",
-    "SimpleContentCollector",
     "SimpleUrlsCollector",
     "SimpleUrlsProvider",
     "UrlsCollector",
     "UrlsProvider",
+    # Pipeline
+    "ContentCollector",
+    "PageAnalyzer",
+    "PageContentCollector",
+    "SimpleContentCollector",
+    "clean_html",
+    "recursive_iframe_replace",
+    "replace_content_first",
+    # Utils
+    "get_clean_url",
+    "get_redirection_clean_url",
+    "is_same_page_url",
 ]
