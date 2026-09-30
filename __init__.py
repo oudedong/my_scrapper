@@ -1,77 +1,86 @@
+from .analyzer import PageAnalyzer
+from .browser_crawler import (
+    ContentCollector,
+    DynamicClickExplorer,
+    DynamicURLExplorer,
+    Global_visit_page_url,
+    Global_visit_set_page_url,
+    IndexedLocatorInfo,
+    PageContentCollector,
+    SimpleContentCollector,
+    SimpleUrlsCollector,
+    SimpleUrlsProvider,
+    UrlsCollector,
+    UrlsProvider,
+)
 from .browser_session import (
     Context,
-    Page,
-    Page_State,
     Frame,
     FrameInfo,
+    FrameRestoreError,
+    Page,
     PageInfo,
+    Page_State,
 )
-from .locator import (
-    Pair,
-    StabilityConfig,
-    LocatorConfig,
-    LocatorNode,
-    LocatorManager,
-)
-from .commands import (
-    Command,
-    Click,
-    Fill,
-)
-from .analyzer import (
-    PageAnalyzer,
-)
+from .commands import Click, Command, Fill
 from .html_cleaner import (
     clean_html,
     recursive_iframe_replace,
+    replace_content_first,
 )
-from .browser_crawler import (
+from .locator import (
+    LocatorConfig,
+    LocatorManager,
+    LocatorNode,
+    Pair,
+    StabilityConfig,
+)
+from .urls import (
     get_clean_url,
     get_redirection_clean_url,
     is_same_page_url,
-    IndexedLocatorInfo,
-    DynamicClickExplorer,
-    DynamicURLExplorer,
-    RedirectError,
-    Global_visit_page_url,
-    Global_visit_set_page_url,
-    Redirected_page_urls,
-    Redirected_page_solver,
-    Try_login_solver,
-    Redirection_db,
 )
 
 __all__ = [
+    # Session & Page
     "Context",
-    "Page",
-    "Page_State",
     "Frame",
     "FrameInfo",
+    "FrameRestoreError",
+    "Page",
     "PageInfo",
+    "Page_State",
+    # Locator
+    "LocatorConfig",
+    "LocatorManager",
+    "LocatorNode",
     "Pair",
     "StabilityConfig",
-    "LocatorConfig",
-    "LocatorNode",
-    "LocatorManager",
-    "Command",
+    # Commands
     "Click",
+    "Command",
     "Fill",
+    # Analyzer
     "PageAnalyzer",
+    # HTML Cleaner
     "clean_html",
     "recursive_iframe_replace",
+    "replace_content_first",
+    # URLs
     "get_clean_url",
     "get_redirection_clean_url",
     "is_same_page_url",
-    "IndexedLocatorInfo",
-    "PageSnapshot",
-    "PageSnapshotStack",
+    # Crawler & Explorer
+    "ContentCollector",
     "DynamicClickExplorer",
     "DynamicURLExplorer",
-    "RedirectError",
     "Global_visit_page_url",
     "Global_visit_set_page_url",
-    "Redirected_page_urls",
-    "Redirected_page_solver",
-    "Try_login_solver",
-    "Redirection_db",
+    "IndexedLocatorInfo",
+    "PageContentCollector",
+    "SimpleContentCollector",
+    "SimpleUrlsCollector",
+    "SimpleUrlsProvider",
+    "UrlsCollector",
+    "UrlsProvider",
 ]

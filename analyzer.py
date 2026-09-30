@@ -1,14 +1,22 @@
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
+
 from bs4 import BeautifulSoup
+
 from .html_cleaner import clean_html
 from .locator import LocatorNode
 
 if TYPE_CHECKING:
     from .browser_session import Page
 
+__all__ = [
+    "PageAnalyzer",
+]
+
 
 class PageAnalyzer:
+
     def __init__(self, page: Page):
         self.page: Page = page
 

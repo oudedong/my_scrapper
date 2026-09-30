@@ -1,40 +1,41 @@
 from __future__ import annotations
+
 import asyncio
 import difflib
-from math import e
 import sys
 import time
 from dataclasses import dataclass
 from typing import override
+
 from playwright.async_api import (
-    async_playwright,
-    Page as PlaywrightPage,
-    Frame as PlaywrightFrame,
-    Playwright,
     Browser,
     BrowserContext,
+    Frame as PlaywrightFrame,
+    Page as PlaywrightPage,
+    Playwright,
+    async_playwright,
 )
 
+from .commands import Click, Command, Fill
 from .html_cleaner import recursive_iframe_replace
 from .locator import (
+    LocatorConfig,
+    LocatorManager,
+    LocatorNode,
     Pair,
     StabilityConfig,
-    LocatorConfig,
-    LocatorNode,
-    LocatorManager,
 )
-from .commands import (
-    Command,
-    Click,
-    Fill
-)
-from .analyzer import (
-    PageAnalyzer,
-)
-
 from .urls import get_clean_url, is_same_page_url
 
 __all__ = [
+    # Core session / page classes & errors
+    "Context",
+    "FrameRestoreError",
+    "Page",
+    "Page_State",
+    "Frame",
+    "FrameInfo",
+    "PageInfo",
     # Re-exported from locator
     "Pair",
     "StabilityConfig",
@@ -45,16 +46,8 @@ __all__ = [
     "Command",
     "Click",
     "Fill",
-    # Re-exported from analyzer
-    "PageAnalyzer",
-    # Core session / page classes
-    "Context",
-    "Page",
-    "Page_State",
-    "Frame",
-    "FrameInfo",
-    "PageInfo",
 ]
+
 
 
 class Context:
@@ -326,7 +319,7 @@ class Page:
                 await command.do(current_frames)
             except Exception as e:
                 if is_same_page_url(self.page.url, current_state.page_url):
-                    print(f"알수없는 이유로 커맨드 실행이 실패함, 실패한 로케이터를 표시하고 건너뜀\ne:{e}")
+                    print(f"page:알수없는 이유로 커맨드 실행이 실패함, 실패한 로케이터를 표시하고 건너뜀\ne:{e}")
                     f_idxs, l_idxs = command.frame_idxs, command.locator_idxs # 제외할 것들(여러개가 있을때, 앞에꺼 하나 실패했는데도 뒤에것도 다 제외하는 문제 발생가능..)
                     for f_idx, l_idx in zip(f_idxs, l_idxs):
                         current_frames[f_idx].locator_manager.exclude_locators([l_idx])
@@ -338,7 +331,7 @@ class Page:
 
             # 1.페이지가 이동되었나 확인
             if self.page_changed:
-                print("page changed")
+                print("page:페이지 이동됨")
                 current_state.command_frames[-1].first = command # 해당프레임에 어떤 커맨드를 적용했는지 저장
                 new_state = Page_State(
                     [await Frame.create(frame) for frame in stable_frames],
@@ -355,7 +348,7 @@ class Page:
                 last_url_set = {f.init_url for f in last_state.second}
                 new_set = {get_clean_url(f.url) for f in stable_frames}
                 if last_url_set != new_set:
-                    print("frame changed")
+                    print("page:프레임 변화함")
                     last_state.first = command # 해당 프레임에서 어떤 커맨드 실행했는지 저장
                     current_state.append_state(
                         None, 
@@ -380,8 +373,8 @@ class Page:
             for new_frame in new_frames:
                 last_frame = last_frames_dict[new_frame.init_url]
                 if new_frame != last_frame:
-                    print("locator changed")
-                    print(f"new/last: {new_frame}/{last_frame}")
+                    print("page:로케이터 변화함")
+                    # print(f"new/last: {new_frame}/{last_frame}")
                     last_state = current_state.get_current_state()
                     last_state.first = command # 해당 프레임에서 어떤 커맨드 실행했는지 저장
                     current_state.append_state(
@@ -394,7 +387,7 @@ class Page:
             for cur_frame in current_frames:
                 await cur_frame.restore(new_frames_dict.get(cur_frame.init_url))
         # 루프가 끝나면 변화없음(모든 커맨드 적용됨)
-        print("nothing changed")
+        print("page:변화없음")
         return False
         
     async def reset_records(self):

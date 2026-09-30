@@ -1,14 +1,25 @@
 from __future__ import annotations
+
 import asyncio
 import difflib
 import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar, override
+
 from playwright.async_api import Frame as PlaywrightFrame, Locator as PlaywrightLocator
+
+__all__ = [
+    "Pair",
+    "StabilityConfig",
+    "LocatorConfig",
+    "LocatorNode",
+    "LocatorManager",
+]
 
 T1 = TypeVar("T1")
 T2 = TypeVar("T2")
+
 
 @dataclass
 class Pair(Generic[T1, T2]):
@@ -61,7 +72,8 @@ class LocatorNode:
                 placeholder: el.placeholder || "",
                 href: el.href || ""
             })
-            """
+            """,
+            timeout=2000,
         )
         return LocatorNode(**infos, locator=locator)
 
@@ -228,7 +240,13 @@ class LocatorManager:
 
     @classmethod
     async def _locators_to_locatorNodes(cls, locators: list[PlaywrightLocator]) -> list[LocatorNode]:
-        return [await LocatorNode.create(l) for l in locators]
+        nodes: list[LocatorNode] = []
+        for l in locators:
+            try:
+                nodes.append(await LocatorNode.create(l))
+            except Exception:
+                continue  # 그 사이 사라진/밀린 요소는 건너뜀
+        return nodes
 
     async def restore(self, frame: PlaywrightFrame|None) -> None:
         """
