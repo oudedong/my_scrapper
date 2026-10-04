@@ -21,7 +21,7 @@ class ContentCollector(ABC):
         pass
 
     @abstractmethod
-    def get_content(self, page_info_dict: dict[str, str]) -> dict[str, str]:
+    def get_content(self, url:str) -> dict[str, str]|None:
         """찾은 content를 반환"""
         pass
 
@@ -35,9 +35,9 @@ class SimpleContentCollector(ContentCollector):
         """content 수집"""
         self.contents[url] = {"url": url, "title": title, "content": content, "content_hash": content_hash}
 
-    def get_content(self, page_info_dict: dict[str, str]) -> dict[str, str]:
+    def get_content(self, url:str) -> dict[str, str]|None:
         """찾은 content를 반환"""
-        return self.contents[page_info_dict["url"]]
+        return self.contents[url]
 
 
 class PageContentCollector:

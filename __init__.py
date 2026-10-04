@@ -35,11 +35,21 @@ from .pipeline import (
     recursive_iframe_replace,
     replace_content_first,
 )
+from .storage import (
+    ContentModel,
+    Database,
+    DatabaseContentCollector,
+    DatabaseUrlsCollector,
+    DatabaseUrlsProvider,
+    DatabaseVisitUrls,
+    UrlModel,
+)
 from .utils import (
     get_clean_url,
     get_redirection_clean_url,
     is_same_page_url,
 )
+
 
 __all__ = [
     # Core (Session, Page, Frame, Locator, Commands)
@@ -80,4 +90,12 @@ __all__ = [
     "get_clean_url",
     "get_redirection_clean_url",
     "is_same_page_url",
+    # Storage
+    "Database",
+    "UrlModel",
+    "ContentModel",
+    "DatabaseUrlsProvider",
+    "DatabaseUrlsCollector",
+    "DatabaseVisitUrls",
+    "DatabaseContentCollector",
 ]
