@@ -25,11 +25,14 @@ class DatabaseUrlsProvider(UrlsProvider):
         self.db: Database = db
         self.queue: list[tuple[str, str]] = []
         self.fetch_limit: int = fetch_limit
+        self.last_id: int = 0
 
     def _peek(self) -> None:
         if len(self.queue) <= 0:
-            models = self.db.select_not_visited(self.fetch_limit)
-            self.queue.extend((m.url, m.title) for m in models)
+            models = self.db.select_not_visited(self.fetch_limit, after_id=self.last_id)
+            if models:
+                self.last_id = max(m.id or 0 for m in models)
+                self.queue.extend((m.url, m.title) for m in models)
 
     @override
     def next(self) -> tuple[str, str]:

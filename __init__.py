@@ -42,6 +42,8 @@ from .storage import (
     DatabaseUrlsCollector,
     DatabaseUrlsProvider,
     DatabaseVisitUrls,
+    Model,
+    SourceUrlModel,
     UrlModel,
 )
 from .utils import (
@@ -92,8 +94,10 @@ __all__ = [
     "is_same_page_url",
     # Storage
     "Database",
+    "Model",
     "UrlModel",
     "ContentModel",
+    "SourceUrlModel",
     "DatabaseUrlsProvider",
     "DatabaseUrlsCollector",
     "DatabaseVisitUrls",
