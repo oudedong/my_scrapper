@@ -40,7 +40,13 @@ class LocatorConfig:
         default_factory=lambda: ["a", "li", "span", "div", "p", "button", "input", "textarea", "select"]
     )
     keyword_forbidden: list[str] = field(
-        default_factory=lambda: ["로그아웃", "logout", "signout", "exit", "나가기", "비밀번호 변경", "회원탈퇴", "delete account"]
+        default_factory=lambda: [
+            "로그아웃", "logout", "signout","login","로그인",
+            "exit", "나가기",
+            "비밀번호 변경", 
+            "회원탈퇴", "delete account", 
+            "language", "언어"
+            ]
     )
 
 
@@ -82,7 +88,7 @@ class LocatorNode:
         return LocatorNode(**infos, locator=locator)
 
     async def click(self) -> None:
-        await self.locator.click(timeout=1500)
+        await self.locator.click(timeout=3000)
 
     async def fill(self, content: str) -> None:
         await self.locator.fill(content)

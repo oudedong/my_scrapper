@@ -5,3 +5,4 @@ playwright==1.60.0
 pyee==13.0.1
 soupsieve==2.8.4
 typing_extensions==4.15.0
+sqlalchemy>=2.0.0

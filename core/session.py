@@ -487,7 +487,7 @@ class Page:
 class Page_State:
 
     def __init__(self, init_frames: list["Frame"], init_command: Command | None, page_url: str, page_title: str):
-        self.page_url: str = page_url
+        self.page_url: str = get_clean_url(page_url) # '#'떼고 저장
         self.page_title: str = page_title
         self.command_frames: list[Pair[Command | None, list[Frame]]] = [Pair(init_command, init_frames)]  # 첫번째는 command, 두번째는 해당커맨드 했을때 프레임들
 

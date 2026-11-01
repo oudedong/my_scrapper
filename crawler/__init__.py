@@ -1,10 +1,10 @@
 from .click_explorer import DynamicClickExplorer, IndexedLocatorInfo
 from .url_crawler import (
     DynamicURLExplorer,
-    Global_visit_page_url,
-    Global_visit_set_page_url,
+    SimpleUrlStorage,
     SimpleUrlsCollector,
     SimpleUrlsProvider,
+    UrlStorage,
     UrlsCollector,
     UrlsProvider,
 )
@@ -12,11 +12,11 @@ from .url_crawler import (
 __all__ = [
     "IndexedLocatorInfo",
     "DynamicClickExplorer",
+    "UrlStorage",
+    "SimpleUrlStorage",
     "UrlsProvider",
     "SimpleUrlsProvider",
     "UrlsCollector",
     "SimpleUrlsCollector",
-    "Global_visit_page_url",
-    "Global_visit_set_page_url",
     "DynamicURLExplorer",
 ]

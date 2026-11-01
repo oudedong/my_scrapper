@@ -5,7 +5,6 @@ from typing import override
 
 from ..core.locator import LocatorNode
 from ..core.session import FrameRestoreError, Page
-from ..utils.urls import get_clean_url
 
 __all__ = [
     "IndexedLocatorInfo",
@@ -44,17 +43,15 @@ class DynamicClickExplorer:
         self._click_candidates: deque[IndexedLocatorInfo | int] | None = None  # 클릭할 요소들 (int: 0: 로케이터 변화, 1: 페이지이동)
         self._urls_queue: deque[tuple[str, int]] = deque()  # (url, depth)
         self._depth: int = 0
-        self._seen: set[tuple[str, IndexedLocatorInfo]] = set()  # url에서 봤던 (로케이터노드, 인덱스) 쌍을 저장해서 스택에 중복으로 쌓는거를 방지
+        self._seen: set[IndexedLocatorInfo] = set()  # 현재 URL 페이지에서 봤던 로케이터를 저장해서 스택에 중복으로 쌓는 것을 방지
 
     def _mark_new(self, infos: list[IndexedLocatorInfo]) -> list[IndexedLocatorInfo]:
-        """이 페이지에서 처음 보는 요소만 등록해서 반환 (이미 후보였던 건 제외)"""
-        page_url = get_clean_url(self._page.page.url)
+        """현재 페이지에서 처음 보는 요소만 등록해서 반환 (이미 후보였던 건 제외)"""
         fresh: list[IndexedLocatorInfo] = []
         for info in infos:
-            key = (page_url, info)
-            if key in self._seen:
+            if info in self._seen:
                 continue
-            self._seen.add(key)
+            self._seen.add(info)
             fresh.append(info)
         return fresh
 
@@ -134,9 +131,10 @@ class DynamicClickExplorer:
                 if len(self._urls_queue) <= 0:
                     return 0  # 더이상 갈곳이 없음
                 url, depth = self._urls_queue.popleft()  # 큐에서 다음으로 탐색할 url을 꺼냄
-                await self._page.goto(url)  # 이동 후 스택 초기화
+                await self._page.goto(url)  # 이동 후 스택 및 seen 초기화
                 self._depth = depth
                 self._click_candidates = None
+                self._seen.clear()
                 continue
             if candidate in (0, 1):  # 뭔가 변화가 발생한 경계이므로 되돌림
                 # await self._page.undo()

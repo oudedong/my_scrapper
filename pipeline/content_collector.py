@@ -3,74 +3,88 @@ from __future__ import annotations
 import hashlib
 from abc import ABC, abstractmethod
 
+from typing_extensions import override
+
 from ..core.session import Page
 from ..crawler.url_crawler import UrlsProvider
 
 __all__ = [
-    "ContentCollector",
-    "SimpleContentCollector",
+    "ContentStorage",
+    "SimpleContentStorage",
     "PageContentCollector",
 ]
 
+class ContentStorage(ABC):
 
-class ContentCollector(ABC):
-
-    @abstractmethod
-    def collect(self, url: str, title: str, content: str, content_hash: str) -> None:
+    def collect(self, url: str, content: str) -> None:
         """content 수집"""
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
+        self._collect(url, content, content_hash)
+    @abstractmethod
+    def _collect(self, url: str, content: str, hash: str) -> None: 
+        """content를 hash해서 반환"""
         pass
 
     @abstractmethod
-    def get_content(self, url:str) -> dict[str, str]|None:
+    def get_content(self, url:str) -> tuple[str, str]|None: # content, hash
         """찾은 content를 반환"""
         pass
 
+    def clear(self, url: str) -> None:
+        """해당 URL에 저장된 콘텐츠 데이터를 초기화(선택적 구현)"""
+        pass
 
-class SimpleContentCollector(ContentCollector):
+
+class SimpleContentStorage(ContentStorage):
 
     def __init__(self) -> None:
-        self.contents: dict[str, dict[str, str]] = {}  # key:url, value:{title, content, content_hash}
-
-    def collect(self, url: str, title: str, content: str, content_hash: str) -> None:
+        self.contents: dict[str, tuple[str, str]] = {}  # key:url, value:(content, hash)
+    @override
+    def _collect(self, url: str, content: str, hash:str) -> None:
         """content 수집"""
-        self.contents[url] = {"url": url, "title": title, "content": content, "content_hash": content_hash}
-
-    def get_content(self, url:str) -> dict[str, str]|None:
+        self.contents[url] = (content, hash)
+    @override
+    def get_content(self, url:str) -> tuple[str, str]|None:
         """찾은 content를 반환"""
-        return self.contents[url]
+        return self.contents.get(url)
+    @override
+    def clear(self, url: str) -> None:
+        self.contents.pop(url, None)
 
+
+from .html_cleaner import clean_html
 
 class PageContentCollector:
     """html본문을 추출해 저장합니다"""
 
-    def __init__(self, page: Page, url_provider: UrlsProvider, content_collector: ContentCollector) -> None:
+    def __init__(self, page: Page, url_provider: UrlsProvider, content_storage: ContentStorage) -> None:
         self._page: Page = page
         self._url_provider: UrlsProvider = url_provider
-        self._content_collector: ContentCollector = content_collector
+        self._content_storage: ContentStorage = content_storage
 
-    async def _fetch_one(self, url: str) -> dict[str, str]:
-        """url하나를 방문해서 추출함"""
+    async def _fetch_one(self, url: str) -> str:
+        """url 하나를 방문해서 정제된 본문 HTML을 추출함"""
         await self._page.goto(url)
-        content = None
-        content_hash = None
         try:
-            content = await self._page.get_raw_content()
-            content_hash = hashlib.sha256(content.encode()).hexdigest()
+            return clean_html(await self._page.get_raw_content())
         except Exception as e:
-            content = f"fail to fetch, e:{e}"
-            content_hash = ""
-        return {"content": content, "content_hash": content_hash}
+            return f"fail to fetch, e:{e}"
 
-    async def fetch_next(self) -> bool:
-        """urlProvider에서 url하나를 받아와 추출함"""
+    async def fetch_next(self) -> bool: # 더 가져올게 있는지 없는지 반환
+        """urlProvider에서 url 하나를 받아와 본문을 추출 후 저장함"""
         if self._url_provider.is_end():
             return False
-        url_tuple = self._url_provider.next()
-        content = await self._fetch_one(url_tuple[0])
-        self._content_collector.collect(url_tuple[0], url_tuple[1], content["content"], content["content_hash"])
+
+        item = self._url_provider.next()
+        if item is None:
+            return False
+
+        url, title = item
+        content = await self._fetch_one(url)
+        self._content_storage.collect(url, content)
         return True
 
     async def fetch_all(self) -> None:
-        """전부추출후 저장"""
+        """전부 추출 후 저장"""
         while await self.fetch_next():
             pass
