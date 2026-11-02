@@ -31,10 +31,14 @@ class UrlStorage(ABC):
         pass
 
     @abstractmethod
+    def remove(self, url:str) -> tuple[str,str]|None:
+        """저장된 URL 제거, 제거된거 반환(없으면 None)"""
+        pass
+
+    @abstractmethod
     def __len__(self) -> int:
         """저장된 URL의 총 개수"""
         pass
-
 
 class SimpleUrlStorage(UrlStorage):
     """메모리 기반 기본 URL 저장소"""
@@ -53,6 +57,15 @@ class SimpleUrlStorage(UrlStorage):
         if url not in self._url_set:
             self._url_set.add(url)
             self.items.append((url, title))
+
+    def remove(self, url: str) -> tuple[str, str] | None:
+        # url title 쌍 찾기
+        for item_url, title in list(self.items):
+            if item_url == url:
+                self.items.remove((item_url, title))
+                self._url_set.discard(item_url)
+                return (item_url, title)
+        return None
 
     def __len__(self) -> int:
         return len(self.items)

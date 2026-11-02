@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     select,
+    update,
     ForeignKey
 )
 from sqlalchemy.orm import (
@@ -55,6 +56,9 @@ class UrlList(Base):
     )
     last_check: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column( # url 활성화 여부, 활성화된 url들에 대해서만 본문,일정을 추출함
+        Boolean, default=True, nullable=False
     )
 
     # 1:1 관계 (UrlList <-> RawContent)
@@ -231,11 +235,14 @@ class Database:
             stmt = (
                 select(UrlList)
                 .outerjoin(RawContent, UrlList.id == RawContent.url_id)
-                .where(RawContent.id.is_(None), UrlList.id > after_id)
+                .where(
+                    RawContent.id.is_(None), 
+                    UrlList.is_active == True, # 활성화된 url들에 대해서만 수행
+                    UrlList.id > after_id)
                 .order_by(UrlList.id.asc())
                 .limit(limit)
-            )
-            return list(sess.execute(stmt).scalars().all())
+            )                                               # all은 엔티티들을 즉시 다 뽑아서 리스트로 만들어줌
+            return list(sess.execute(stmt).scalars().all()) # scalar(s)는 튜플의 첫번째 값을 주는데, 여기서 select에 엔티티클래스를 쓰면 튜플의 첫번쨰가 엔티티자체가 됨!!
 
     def select_sources(self) -> list[UrlList]:
         """등록된 시작 URL (is_source == True) 전체 목록 조회"""
@@ -272,6 +279,33 @@ class Database:
                 .limit(limit)
             )
             return list(sess.execute(stmt).scalars().all())
+
+    def select_deactivated_urls(self, limit: int = 500, after_id: int = 0) -> list[UrlList]:
+        """
+        비활성화된 url들을 반환합니다 (Keyset Pagination)
+        """
+        with self.session() as sess:
+            stmt = (
+                select(UrlList)
+                .where(UrlList.is_active == False, UrlList.id > after_id)
+                .order_by(UrlList.id.asc())
+                .limit(limit)
+            )
+            return list(sess.execute(stmt).scalars().all())
+
+    def deactivate_urls(self, urls: list[str]) -> int:
+        """수집된 urls들에서 지정한 url들을 비활성화 합니다"""
+        if not urls:
+            return 0
+        with self.session() as sess:
+            stmt = (
+                update(UrlList)
+                .where(UrlList.url.in_(urls))
+                .values(is_active=False)
+            )
+            result = sess.execute(stmt)
+            return result.rowcount
+
 
     def close(self) -> None:
         """엔진 연결 종료"""
