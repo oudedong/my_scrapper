@@ -39,6 +39,7 @@ from .storage.url_storage import (
     DatabaseNotVisitedUrlsProvider,
     DatabaseUrlsCollector,
     DatabaseUrlsProvider,
+    DatabaseDeactivatedUrlsProvider
 )
 from .utils.urls import get_clean_url
 
@@ -111,7 +112,7 @@ class WebScrapper:
                 model=gemini_model,
             )
         else:
-            print("[!] Gemini API 키가 제공되지 않아 MockContentExtractor로 동작합니다.")
+            print("[!] Gemini API 키가 제공되지 않아 MockContentExtractor로 동작합니다(디버깅용).")
             self.extractor = MockContentExtractor()
 
         # 3. 저장소 및 수집기 인스턴스
@@ -125,8 +126,13 @@ class WebScrapper:
     def add_source(self, url: str, title: str = "") -> None:
         """크롤링을 시작할 Source URL 등록"""
         clean = get_clean_url(url)
-        source_storage = DBUrlsStorage(self.db, is_source=True)
+        source_storage = DBUrlsStorage(self.db, is_source=True) # is_source가 true인 행만 다루는 저장소 생성
         source_storage.add(clean, title)
+    def remove_source(self, url: str) -> None:
+        """등록되어있는 Source URL 제거"""
+        clean = get_clean_url(url)
+        source_storage = DBUrlsStorage(self.db, is_source=True)
+        source_storage.remove(clean)
 
     def add_sources(self, urls: list[str] | list[tuple[str, str]]) -> None:
         """여러 개의 Source URL을 일괄 등록"""
@@ -136,6 +142,40 @@ class WebScrapper:
                 self.add_source(u, t)
             else:
                 self.add_source(item)
+    def remove_sources(self, urls: list[str]) -> None:
+        """등록되어있는 Source URL 제거"""
+        for url in urls:
+            self.remove_source(url)
+    
+    def deactivate_url(self,url:str):
+        """수집된 url을 비활성화 합니다(추출목록에서 제외됨)"""
+        clean = get_clean_url(url)
+        self.db.deactivate_urls([clean])
+    def deactivate_urls(self,urls:list[str]):
+        cleans = [get_clean_url(url) for url in urls]
+        self.db.deactivate_urls(cleans)
+
+    def remove_deactivated_things(self):
+        """비활성화된 url과 관련된 것들을(추출된 본문,일정) 제거합니다"""
+        deactivated_urls_storage = DatabaseDeactivatedUrlsProvider(self.db)  # 비활성화 된 url들을 순회함
+        while not deactivated_urls_storage.is_end():
+            current = deactivated_urls_storage.next()
+            if not current:
+                break  # 더이상 비활성화된 url이 없을때
+            cur_url, _ = current
+            # 외래키 제약조건 방지를 위해 자식(ExtractedSchedule) -> 부모(RawContent) 순으로 삭제
+            self.schedule_storage.remove(cur_url)
+            self.content_storage.remove(cur_url)
+            self.filtered_storage.remove(cur_url)
+
+    def remove_extracted_schedule(self, url:str):
+        """특정 url에 대해서 추출된 일정 제거(여러게면 전부제거)"""
+        clean = get_clean_url(url)
+        self.schedule_storage.remove(clean)
+    def remove_extracted_schedules(self, urls:list[str]):
+        for url in urls:
+            self.remove_extracted_schedule(url)
+
 
     # =========================================================================
     # 각 단계별 독립 실행 인터페이스 (이어하기 가능)

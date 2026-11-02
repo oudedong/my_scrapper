@@ -1,11 +1,10 @@
-from common.schedule_db import add_schedule
+from common.schedule_db import add_schedule, upsert_by_source
 from my_scrapper.scrapper import MiguScrapper     # 크롤러 인터페이스
 from my_scrapper.storage import ExtractedSchedule # 크롤링된 일정
-from my_scrapper.storage import FilteredUrl # url 정보
 
-"""크롤러의 db에 수집된 일정을 통합db로 옮기는 코드"""
+"""크롤러와 통합db를 연결하는 함수"""
 
-def import_schedules_from_crawler_db_to_common_db(scrapper: MiguScrapper, path:str)->list[int]:
+def import_schedules_from_crawler_db_to_common_db(scrapper: MiguScrapper, path:str)->list[tuple[int,str]]:
     """
     크롤러 db에 추출되어 있는 일정을 통합db로 옮기는 코드
         scrapper: 크롤러 db와 연결된 크롤러
@@ -16,7 +15,7 @@ def import_schedules_from_crawler_db_to_common_db(scrapper: MiguScrapper, path:s
     # url로부터 페이지 제목 매핑해놓음
     url_list = scrapper.get_filtered_urls()
     url_title_dict = {}
-    inserted_ids:list[int] = []
+    rets:list[tuple[int,str]] = []
     for i in range(len(url_list)):
         cur_url   = url_list[i].url
         cur_title = url_list[i].title
@@ -34,5 +33,6 @@ def import_schedules_from_crawler_db_to_common_db(scrapper: MiguScrapper, path:s
         source = 'crawl'
         source_id = schedule.id
         # 넣기
-        inserted_ids.append(add_schedule(path, title, content, due_at, start_at, url, source, source_id))
-    return inserted_ids
+        rets.append(upsert_by_source(path, source, source_id, title, content, due_at, start_at, url))
+        # inserted_ids.append(add_schedule(path, title, content, due_at, start_at, url, source, source_id))
+    return rets

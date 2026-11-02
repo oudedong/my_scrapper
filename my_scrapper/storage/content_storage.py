@@ -72,6 +72,18 @@ class DBContentStorage(ContentStorage):
             if raw is None or raw.content is None:
                 return None
             return (raw.content, raw.content_hash or "")
+    
+    @override
+    def remove(self, url:str)-> tuple[str,str]|None: # content, hash
+        """url에 해당하는 원문을 찾아 db에서 제거함"""
+        clean = get_clean_url(url)
+        with self.db.session() as sess:
+            stmt = select(RawContent).where(RawContent.url == clean)
+            item = sess.execute(stmt).scalar_one_or_none()
+            if item:
+                sess.delete(item)
+                return (item.content, item.content_hash)
+            return None # 아무것도 못찾은경우
 
 
 class DBScheduleStorage(ContentStorage):
@@ -140,8 +152,8 @@ class DBScheduleStorage(ContentStorage):
                 sess.add(record)
 
     @override
-    def clear(self, url: str) -> None:
-        """특정 URL에 대해 기등록된 ExtractedSchedule 레코드들을 모두 삭제"""
+    def remove(self, url: str) -> None:
+        """특정 URL에 대해 등록된 ExtractedSchedule 레코드들을 모두 삭제"""
         clean_url = get_clean_url(url)
         with self.db.session() as sess:
             schedules = list(
