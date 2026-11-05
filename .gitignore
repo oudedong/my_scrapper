@@ -1,9 +1,3 @@
-.env
-.venv/
-__pycache__/
-
-# Runtime/workspace artifacts
-workspace/data/
+__pycache__
 *.db
-.pytest_cache/
-
+test_and_notes.py
