@@ -149,7 +149,8 @@ class DBScheduleStorage(ContentStorage):
                     raw_json=item_json,
                 )
                 sess.add(record)
-
+                
+    @override
     def remove(self, url: str) -> None:
         """특정 URL에 대해 등록된 ExtractedSchedule 레코드들을 모두 삭제"""
         clean_url = get_clean_url(url)

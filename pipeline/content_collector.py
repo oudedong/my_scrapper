@@ -48,6 +48,7 @@ class SimpleContentStorage(ContentStorage):
     def get_content(self, url:str) -> tuple[str, str]|None:
         """찾은 content를 반환"""
         return self.contents.get(url)
+    @override
     def remove(self, url: str) -> tuple[str, str]|None: # 제거된 것의 content, hash
         """url에 해당하는 content를 지움"""
         return self.contents.pop(url, None)
