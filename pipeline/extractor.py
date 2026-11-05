@@ -238,7 +238,8 @@ class PageContentExtractor:
                 extracted_list = []
 
             # 재추출 시 중복을 방지하기 위해 해당 URL의 기존 저장 데이터를 초기화
-            self._target_storage.clear(url)
+            # self._target_storage.clear(url)
+            self._target_storage.remove(url)
 
             # 추출된 항목들을 target_storage에 각각 개별적으로 저장
             for extracted_item in extracted_list:

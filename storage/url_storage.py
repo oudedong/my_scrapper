@@ -21,6 +21,7 @@ __all__ = [
     "DatabaseSourceUrlsProvider",
     "DatabaseFilteredUrlsProvider",
     "DatabaseUrlsCollector",
+    "DatabaseDeactivatedUrlsProvider",
 ]
 
 
@@ -72,6 +73,21 @@ class DBUrlsStorage(UrlStorage):
                 sess.add(record)
             elif not existing.title and title:
                 existing.title = title
+
+    @override
+    def remove(self, url:str)->tuple[str,str]|None:
+        clean = get_clean_url(url)
+        with self.db.session() as sess:
+            stmt = select(self.model_type).where(
+                self.model_type.url == clean
+            )
+            if self.is_source: # is_source면 source인 애들만 제거하도록 함
+                stmt = stmt.where(UrlList.is_source == True)
+            item = sess.execute(stmt).scalar_one_or_none()
+            if item:
+                sess.delete(item)
+                return (item.url, item.title)
+            return None # 아무것도 못찾은경우
 
     @override
     def __len__(self) -> int:
@@ -139,6 +155,11 @@ class DatabaseUrlsProvider(UrlsProvider):
         self._peek()
         return len(self.queue) <= 0
 
+class DatabaseDeactivatedUrlsProvider(DatabaseUrlsProvider):
+    """DB에서 비활성화된 URL들을 순환하는 Provider"""
+    @override
+    def _select(self) -> list[UrlList]:
+        return self.db.select_deactivated_urls(self.fetch_limit, self.last_id)
 
 class DatabaseNotVisitedUrlsProvider(DatabaseUrlsProvider):
     """DB에서 아직 본문(RawContent)이 수집되지 않은 UrlList 목록을 순서대로 읽어오는 Provider"""
