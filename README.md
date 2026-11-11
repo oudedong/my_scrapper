@@ -23,8 +23,14 @@
 
 | 담당 | 내용 |
 |---|---|
-| 본인 | 크롤러, 본문 수집·필터링·LLM 일정 추출 파이프라인, 추출한 일정을 팀 공용 DB로 옮기는 연동 코드 |
+| 본인 | 크롤러, 본문 수집·필터링·LLM 일정 추출 파이프라인, 추출한 일정을 팀 공용 DB로 옮기는 연동 코드, 비서·텔레그램 봇에 크롤러 기능 연결 |
 | 팀원 | Canvas LMS 과제·공지 수집, 공유 일정 DB, Gemini 답변 비서, 텔레그램 봇 |
+
+**팀 시스템에 연결한 방식**
+- **공유 일정 DB 반영**: 추출한 일정을 팀 규칙대로 공유 테이블의 입구 함수(`upsert_by_source`)로만 넣고, 출처는 `crawler:<사이트 도메인>`으로 구분합니다. 크롤러 일정 id를 고유키로 써서 여러 번 반영해도 중복이 생기지 않고, 반영한 URL은 비활성화한 뒤 관련 데이터를 지워 **같은 일정이 다시 올라가지 않게** 했습니다.
+- **말로 시키기**: Gemini 비서에 크롤러 함수 호출 6개(실행, 진행 상황, 결과 반영, 대상 URL 조회·추가·삭제)를 추가했습니다. 크롤링은 수 분이 걸려 **별도 스레드에서 실행**하고 바로 "시작했어요"라고 답하므로 비서가 멈추지 않습니다. 모델이 진행 상황을 지어내지 않도록, 상태 질문에는 반드시 조회 함수를 호출하게 규칙을 두었습니다.
+- **텔레그램 명령어**: `/crawl`, `/crawl_status`, `/crawl_import`, `/crawl_urls`, `/crawl_add`, `/crawl_remove`. 명령어는 비서의 크롤러 함수를 그대로 호출해 **말로 시킨 것과 같은 크롤러·같은 진행 상태**를 공유하고, 크롤링이 끝나면 결과를 먼저 보내 줍니다.
+- **예약 크롤링**: 매일 정해진 시각에 크롤링하고 끝나면 공유 DB에 자동으로 반영합니다. 사용자가 실행한 크롤링과 겹치면 두 번 돌리지 않습니다.
 
 크롤러 코드는 팀 저장소에 `git subtree`로 포함해, 양쪽에서 수정한 내용을 주고받습니다.
 
@@ -50,7 +56,7 @@ flowchart LR
 |---|---|---|
 | 1. URL 탐색 `crawl()` | 시작 URL에서 클릭 가능한 요소를 하나씩 눌러 새 페이지를 찾음 | `url` |
 | 2. 본문 수집 `fetch_contents()` | 아직 방문하지 않은 URL만 열어 본문을 수집하고 정제 | `raw_content` |
-| 3. 필터링 `filter_urls()` | 키워드로 공지 필요한 내용이 포함된 페이지만 선별 | `filtered_url` |
+| 3. 필터링 `filter_urls()` | 키워드로 필요한 내용(공지·모집·마감 등)이 있는 페이지만 선별 | `filtered_url` |
 | 4. 일정 추출 `extract_schedules()` | LLM으로 원하는 내용을 JSON으로 추출 | `extracted_schedules` |
 
 각 단계는 **독립적으로 실행**할 수 있고 이미 처리한 항목은 건너뛰기 때문에, 중간에 멈춰도 그 지점부터 이어서 작업할 수 있습니다. LLM 추출도 아직 추출하지 않은 본문만 골라 추출해 API 비용을 아낍니다.
@@ -125,6 +131,12 @@ flowchart LR
 
 저장소(`UrlStorage`, `ContentStorage`), 공급자(`UrlsProvider`), 필터(`ContentFilter`), 추출기(`ContentExtractor`)를 인터페이스로 분리했습니다. 메모리 저장소와 DB(SQLAlchemy) 저장소, Gemini와 Mock 추출기를 코드 수정 없이 바꿔 끼울 수 있습니다.
 
+### 7. 수집 대상과 결과 관리
+
+- **시작점 관리**: 크롤링을 시작할 URL을 추가·삭제할 수 있습니다(`add_sources`, `remove_sources`). CLI의 `remove`는 시작점 삭제와 함께 그 URL과 관련된 수집 결과까지 정리합니다.
+- **비활성화**: 이미 다른 곳(예: 팀 공유 DB)으로 옮긴 URL은 비활성화(`deactivate_urls`)해 다음 실행에서 다시 수집·추출하지 않게 하고, `remove_deactivated_things()`로 비활성화된 URL의 본문·필터·추출 결과를 지웁니다. 지울 때는 외래키 제약을 지키도록 추출 결과 → 본문 순서로 삭제합니다.
+- **디버그 모드**: `debug=True`(CLI는 `--debug`)로 실행하면 브라우저 창을 띄워 클릭 탐색 과정을 눈으로 확인할 수 있습니다. 기본은 창 없이(headless) 실행해 서버에서도 동작합니다.
+
 <br>
 
 ## 실행 모습
@@ -134,7 +146,21 @@ flowchart LR
 
 <br>
 
-## 사용 예시
+## 사용 방법
+
+### 설치
+
+```bash
+pip install -r requirements.txt
+python -m playwright install chromium   # 크롤러가 띄울 브라우저 (처음 한 번)
+```
+
+- Python 3.12 이상이 필요합니다.
+- `pip install`은 Playwright **라이브러리**만 설치합니다. 실제로 띄울 **브라우저**는 위 두 번째 명령으로 따로 받아야 하며, 빠뜨리면 크롤링할 때 `Executable doesn't exist` 오류가 납니다. Playwright 버전을 올렸을 때도 다시 실행해야 합니다.
+- Linux/WSL에서 `missing dependencies` 오류가 나면 `sudo <venv의 python> -m playwright install-deps chromium`을 한 번 실행합니다.
+- 저장소 폴더(`my_scrapper`)의 **상위 폴더**에서 패키지로 import하거나 실행합니다.
+
+### 코드에서 사용
 
 ```python
 import asyncio
@@ -149,6 +175,7 @@ async def main():
     scrapper.add_source("https://example.ac.kr/notice", "학과 공지")
 
     await scrapper.run()          # 1~4단계 일괄 실행 (단계별 실행도 가능)
+    # debug=True 로 만들면 브라우저 창이 보임: WebScrapper(..., debug=True)
 
     for s in scrapper.get_schedules():
         print(s.start_date, s.end_date, s.summary)
@@ -157,13 +184,17 @@ async def main():
 asyncio.run(main())
 ```
 
-```bash
-pip install -r requirements.txt
-playwright install chromium
-```
+### 명령줄(CLI)로 실행
 
-- Python 3.12 이상이 필요합니다.
-- 저장소 폴더(`my_scrapper`)의 상위 폴더에서 패키지로 import해 사용합니다.
+```bash
+python -m my_scrapper set -k <GEMINI_API_KEY>                    # 키 저장 (.env.crawler)
+python -m my_scrapper add -u https://example.ac.kr/notice --description "학과 공지"
+python -m my_scrapper run                                        # 1~4단계 전체 실행
+python -m my_scrapper run -s crawl                               # 특정 단계만: crawl | fetch_contents | filter_urls | extract_schedules
+python -m my_scrapper get -t schedules                           # 결과 보기: source_urls | urls | filtered_urls | schedules
+python -m my_scrapper remove -u https://example.ac.kr/notice     # 시작점과 관련 결과 삭제
+```
+명령 뒤에 `--debug`를 붙이면 브라우저 창을 띄워 탐색 과정을 볼 수 있습니다.
 
 <br>
 
@@ -171,6 +202,7 @@ playwright install chromium
 
 ```
 my_scrapper/
+├── __main__.py              # CLI (python -m my_scrapper)
 ├── scrapper.py              # 4단계 파이프라인을 묶은 WebScrapper
 ├── core/
 │   ├── session.py           # 브라우저 세션, 페이지 상태 기록·복원, iframe 안정화
